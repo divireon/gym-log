@@ -3,7 +3,7 @@ import { SEED_EXERCISES } from './seed.js';
 import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 
-const VERSION = '1.2.1';
+const VERSION = '1.3.0'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -580,6 +580,7 @@ function viewHome() {
   const wk = activities().filter(t => t >= weekStart(Date.now())).length;
   const fins = finished();
   return `<header class="top"><h1>Workout</h1></header>
+    ${updateBanner()}
     <div class="stats3">
       <div class="stat"><b>${wk}</b><span>this week</span></div>
       <div class="stat"><b>${weekStreak()}</b><span>week streak</span></div>
@@ -1015,7 +1016,8 @@ function viewSettings() {
   const st = S.settings();
   const sw = (key, label, note = '') => `<label class="row-item"><span>${label}${note ? `<small class="faint block">${note}</small>` : ''}</span><input type="checkbox" class="switch" data-bind="set-${key}" ${st[key] ? 'checked' : ''}></label>`;
   return `<header class="top"><h1>Settings</h1></header>
-    <div class="section-head"><h2>Rest timer</h2></div>
+    ${updateBanner()}
+    <div class="section-head first"><h2>Rest timer</h2></div>
     <div class="card list">
       <label class="row-item"><span>Default rest for new exercises</span>
         <select class="select-sm" data-bind="set-defaultRest">${REST_OPTS.filter(Boolean).map(s => `<option value="${s}" ${st.defaultRest === s ? 'selected' : ''}>${fmtClock(s)}</option>`).join('')}</select></label>
@@ -1039,7 +1041,14 @@ function viewSettings() {
       <b class="text">Android:</b> open in Chrome, tap ⋮, then <i>Install app</i>.<br>
       Once installed it opens full screen and works without signal.
     </div>
-    <p class="faint small center" style="margin-top:24px">Gym Log v${VERSION}</p>`;
+    <div class="section-head"><h2>App</h2></div>
+    <div class="card list">
+      <div class="row-item"><span>Version</span><span class="meta">${VERSION}</span></div>
+      ${updateInfo
+        ? `<button class="row-item accent-row" data-act="apply-update" ${updating ? 'disabled' : ''}><span>${updating ? 'Updating…' : `Update to v${esc(updateInfo.version)}`}</span>${icon('chev', 18)}</button>`
+        : `<button class="row-item" data-act="check-update"><span>Check for updates</span>${icon('chev', 18)}</button>`}
+      <button class="row-item" data-act="apply-update-force"><span>Reload latest version<small class="faint block">Re-downloads the app if something looks out of date. Your data isn’t touched.</small></span>${icon('chev', 18)}</button>
+    </div>`;
 }
 
 // ---------- sync UI ----------
@@ -1085,6 +1094,71 @@ function updateSyncCard() {
   const el = document.getElementById('sync-card');
   if (el && !el.contains(document.activeElement)) el.innerHTML = syncCardHTML();
 }
+
+// ---------- app updates ----------
+// version.json is always fetched live (the offline layer never caches it). If it names a newer
+// version than this code, show an "Update available" banner; tapping it downloads fresh files and reloads.
+const APP_FILES = ['./', 'index.html', 'css/styles.css', 'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/config.js', 'manifest.webmanifest'];
+let updateInfo = null;      // { version } when a newer version is published
+let updating = false;
+let lastUpdateCheck = 0;
+
+function isNewer(a, b) {
+  const x = String(a).split('.').map(n => parseInt(n, 10) || 0), y = String(b).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+}
+
+async function checkForUpdate(manual = false) {
+  lastUpdateCheck = Date.now();
+  try {
+    const res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { version } = await res.json();
+    // also nudge the browser to look for a new offline layer
+    if (navigator.serviceWorker) navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+    const had = updateInfo && updateInfo.version;
+    updateInfo = isNewer(version, VERSION) ? { version } : null;
+    if (manual && !updateInfo) toast(`You’re up to date (v${VERSION})`);
+    if ((updateInfo && updateInfo.version) !== had) safeRender();
+  } catch (err) {
+    if (manual) toast('Couldn’t check for updates. Are you online?');
+  }
+}
+
+function waitForNewWorker(reg, ms) {
+  return new Promise(resolve => {
+    const t = setTimeout(resolve, ms);
+    const w = reg.installing || reg.waiting;
+    if (!w) { clearTimeout(t); resolve(); return; }
+    if (w.state === 'installed') w.postMessage('skipWaiting');
+    w.addEventListener('statechange', () => {
+      if (w.state === 'installed') w.postMessage('skipWaiting');
+      if (w.state === 'activated' || w.state === 'redundant') { clearTimeout(t); resolve(); }
+    });
+  });
+}
+
+async function applyUpdate() {
+  if (updating) return;
+  if (navigator.onLine === false) { toast('Connect to the internet to update'); return; }
+  updating = true;
+  safeRender();
+  try {
+    // 1) throw away the old offline copy
+    if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+    // 2) download every file fresh from the server (bypassing all caches)
+    await Promise.all(APP_FILES.map(u => fetch(u, { cache: 'reload' }).catch(() => null)));
+    // 3) install the newest offline layer and let it take over
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (reg) { await reg.update().catch(() => {}); await waitForNewWorker(reg, 8000); }
+  } catch (err) { console.warn('update', err); }
+  location.reload();
+}
+
+const updateBanner = () => updateInfo
+  ? `<button class="update-banner" data-act="apply-update" ${updating ? 'disabled' : ''}>${icon('up', 18)}<span>${updating ? 'Updating…' : `Update available (v${esc(updateInfo.version)}). <b>Tap to update</b>`}</span></button>`
+  : '';
 
 // Re-render after remote changes arrive, but never while you're typing or a sheet is open.
 let renderPending = false;
@@ -1387,6 +1461,13 @@ const ACTIONS = {
     S.remove('bodyweights', el.dataset.id); render();
   },
 
+  // updates
+  'check-update': () => { toast('Checking…'); checkForUpdate(true); },
+  'apply-update': () => applyUpdate(),
+  'apply-update-force': async () => {
+    if (await confirmBox('Reload the latest version?', 'Re-downloads the app files and restarts it. Your workouts and settings stay on this device.', 'Reload')) applyUpdate();
+  },
+
   // sync
   'sync-now': () => { Sync.syncNow(); },
   'sign-out': async () => {
@@ -1513,6 +1594,12 @@ function updateSyncCardForce() { const el = document.getElementById('sync-card')
 // ---------- go ----------
 render();
 Sync.init({ onRemote: () => safeRender(), onStatus: () => updateSyncCard() });
+
+// Look for app updates shortly after launch and whenever the app comes back to the foreground.
+setTimeout(() => checkForUpdate(), 1500);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && Date.now() - lastUpdateCheck > 5 * 60 * 1000) checkForUpdate();
+});
 
 if ('serviceWorker' in navigator) {
   const local = ['localhost', '127.0.0.1'].includes(location.hostname) && !location.search.includes('sw=1');

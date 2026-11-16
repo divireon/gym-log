@@ -1,6 +1,8 @@
-// Offline support: cache the app shell, serve it from cache, refresh it in the background.
-// Bump CACHE when shipping changes so phones pick up the new version.
-const CACHE = 'gym-log-v4';
+// Offline support: serve the app from a local copy instantly, and refresh that copy from the server
+// in the background. Every download asks the server for the newest file ("no-cache" / "reload"),
+// so a fresh publish is never hidden behind the browser's own short-term cache.
+// Bump CACHE whenever you publish (and bump version.json + VERSION in js/app.js).
+const CACHE = 'gym-log-v5';
 const ASSETS = [
   './', 'index.html', 'css/styles.css',
   'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/config.js',
@@ -8,7 +10,11 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
@@ -19,19 +25,30 @@ self.addEventListener('activate', e => {
   );
 });
 
+self.addEventListener('message', e => {
+  if (e.data === 'skipWaiting') self.skipWaiting();
+});
+
 self.addEventListener('fetch', e => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin) return; // never touch cloud sync requests
+  if (url.pathname.endsWith('/version.json')) return;                  // update checks always go to the network
+
+  const forceFresh = req.cache === 'reload' || req.cache === 'no-store';
+  const fetchFresh = () => fetch(url.href, { cache: forceFresh ? 'reload' : 'no-cache', credentials: 'same-origin' });
 
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const key = req.mode === 'navigate' ? 'index.html' : req;
-    const cached = await cache.match(key, { ignoreSearch: true });
-    const fresh = fetch(req).then(res => {
+    const fresh = fetchFresh().then(res => {
       if (res.ok) cache.put(key, res.clone());
       return res;
     }).catch(() => null);
+
+    if (forceFresh) return (await fresh) || (await cache.match(key, { ignoreSearch: true })) || new Response('Offline', { status: 503 });
+
+    const cached = await cache.match(key, { ignoreSearch: true });
     if (cached) { e.waitUntil(fresh); return cached; }
     return (await fresh) || new Response('Offline', { status: 503 });
   })());

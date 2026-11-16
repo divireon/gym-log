@@ -324,6 +324,16 @@ input[type="date"].input { -webkit-appearance: none; appearance: none; min-heigh
 .bw-item { display: grid; grid-template-columns: 1fr auto 36px; align-items: center; gap: 8px; padding: 2px 0 2px 2px; font-size: 14px; border-bottom: 1px solid var(--line); }
 .bw-item:last-child { border-bottom: 0; }
 
+/* updates */
+.update-banner {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 11px 14px; margin: 0 0 12px; border-radius: 11px;
+  background: var(--accent-soft); color: var(--accent); font-size: 14px; font-weight: 500;
+}
+.update-banner b { font-weight: 700; }
+.update-banner:disabled { opacity: .7; }
+.accent-row { color: var(--accent); font-weight: 600; }
+
 /* sync */
 .sync-title { display: flex; align-items: center; gap: 8px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--faint); }
