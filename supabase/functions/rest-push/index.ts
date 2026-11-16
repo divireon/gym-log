@@ -9,13 +9,21 @@ const PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY') ?? '';
 const PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY') ?? '';
 const SECRET = Deno.env.get('PUSH_SECRET') ?? '';
 
-webpush.setVapidDetails('https://divireon.github.io/gym-log/', PUBLIC_KEY, PRIVATE_KEY);
-
 type Alert = { endpoint: string; p256dh: string; auth: string; title?: string; body?: string };
+
+let vapidReady = false;
 
 Deno.serve(async (req) => {
   if (!SECRET || req.headers.get('x-push-secret') !== SECRET) {
     return new Response('forbidden', { status: 403 });
+  }
+  if (!vapidReady) {
+    try {
+      webpush.setVapidDetails('https://divireon.github.io/gym-log/', PUBLIC_KEY, PRIVATE_KEY);
+      vapidReady = true;
+    } catch (err) {
+      return Response.json({ error: 'VAPID keys missing or invalid: ' + (err as Error).message }, { status: 500 });
+    }
   }
   let alerts: Alert[] = [];
   try { alerts = (await req.json()).alerts ?? []; } catch { return new Response('bad request', { status: 400 }); }
