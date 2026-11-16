@@ -1,6 +1,6 @@
 // Offline support: cache the app shell, serve it from cache, refresh it in the background.
 // Bump CACHE when shipping changes so phones pick up the new version.
-const CACHE = 'gym-log-v3';
+const CACHE = 'gym-log-v4';
 const ASSETS = [
   './', 'index.html', 'css/styles.css',
   'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/config.js',

@@ -3,7 +3,7 @@ import { SEED_EXERCISES } from './seed.js';
 import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');

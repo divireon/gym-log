@@ -27,9 +27,12 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
-html { background: var(--bg); }
+/* iOS home-screen apps with a translucent status bar size the page short by the status-bar height.
+   On short pages that leaves the bottom tab bar floating above a gap. Making the page at least
+   that much taller makes iOS lay out the full screen, so fixed bars sit at the true bottom. */
+html { background: var(--bg); min-height: calc(100% + env(safe-area-inset-top, 0px)); }
 body {
-  margin: 0; background: var(--bg); color: var(--text);
+  margin: 0; background: var(--bg); color: var(--text); min-height: 100%;
   font: 15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
   font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: none; -webkit-text-size-adjust: 100%;
