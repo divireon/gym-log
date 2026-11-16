@@ -2,10 +2,10 @@
 // in the background. Every download asks the server for the newest file ("no-cache" / "reload"),
 // so a fresh publish is never hidden behind the browser's own short-term cache.
 // Bump CACHE whenever you publish (and bump version.json + VERSION in js/app.js).
-const CACHE = 'gym-log-v5';
+const CACHE = 'gym-log-v6';
 const ASSETS = [
   './', 'index.html', 'css/styles.css',
-  'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/config.js',
+  'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/push.js', 'js/config.js',
   'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
@@ -27,6 +27,27 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('message', e => {
   if (e.data === 'skipWaiting') self.skipWaiting();
+});
+
+// Lock-screen rest alerts. iPhone requires every push to show a notification, so always show one.
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Rest over', {
+    body: d.body || 'Time for your next set',
+    tag: 'rest',
+    renotify: true,
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+  }));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    const open = list.find(c => 'focus' in c);
+    return open ? open.focus() : self.clients.openWindow('./');
+  }));
 });
 
 self.addEventListener('fetch', e => {

@@ -90,7 +90,7 @@ async function accessToken(force = false) {
   return refreshing;
 }
 
-async function api(method, path, body, headers = {}, retry = true) {
+export async function api(method, path, body, headers = {}, retry = true) {
   const res = await fetch(BASE + path, {
     method,
     headers: { apikey: KEY, Authorization: 'Bearer ' + await accessToken(), 'Content-Type': 'application/json', ...headers },

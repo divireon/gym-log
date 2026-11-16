@@ -2,8 +2,9 @@ import * as S from './store.js';
 import { SEED_EXERCISES } from './seed.js';
 import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
+import * as Push from './push.js';
 
-const VERSION = '1.3.0'; // keep in step with version.json when publishing
+const VERSION = '1.4.0'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -394,13 +395,18 @@ function tick() {
 }
 setInterval(tick, 250);
 
+const restAlertText = label => `${label} · time for your next set`;
 function startRest(sec, label) {
   rest = { endAt: Date.now() + sec * 1000, total: sec, label, alerted: false };
   S.setMeta('rest', rest);
   restMode = null;
   renderRest();
+  Push.scheduleAt(rest.endAt, restAlertText(label));
 }
-function clearRest() { rest = null; S.setMeta('rest', null); restMode = null; renderRest(); }
+function clearRest() {
+  if (rest && rest.endAt > Date.now()) Push.cancel(); // only if the lock-screen alert hasn't fired yet
+  rest = null; S.setMeta('rest', null); restMode = null; renderRest();
+}
 
 function renderRest(now = Date.now()) {
   if (!rest) {
@@ -427,15 +433,32 @@ function renderRest(now = Date.now()) {
   }
 }
 
-let actx = null;
+// Audio: iPhones mute web audio in silent mode unless the page says it's playing like a music app
+// ("playback" audio session). We only switch to that for the beep itself, then let the audio go idle
+// again so music from other apps isn't held up.
+let actx = null, audioIdle = null;
+function setAudioSession(type) { try { if (navigator.audioSession) navigator.audioSession.type = type; } catch {} }
+function audioGoIdleSoon(ms = 1500) {
+  clearTimeout(audioIdle);
+  audioIdle = setTimeout(() => {
+    try { if (actx && actx.state === 'running') actx.suspend(); } catch {}
+    setAudioSession('auto');
+  }, ms);
+}
 function unlockAudio() {
   try {
-    if (!actx) { const C = window.AudioContext || window.webkitAudioContext; if (C) actx = new C(); }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (!actx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return; actx = new C(); }
+    if (actx.state !== 'running') actx.resume().then(() => audioGoIdleSoon()).catch(() => {});
   } catch {}
 }
 function beep() {
   if (!actx) return;
+  clearTimeout(audioIdle);
+  if (S.settings().silentBeep) setAudioSession('playback');
+  const play = () => { playTones(); audioGoIdleSoon(); };
+  if (actx.state !== 'running') actx.resume().then(play).catch(play); else play();
+}
+function playTones() {
   const t = actx.currentTime;
   [0, 0.22, 0.44].forEach((d, i) => {
     const o = actx.createOscillator(), g = actx.createGain();
@@ -1021,10 +1044,12 @@ function viewSettings() {
     <div class="card list">
       <label class="row-item"><span>Default rest for new exercises</span>
         <select class="select-sm" data-bind="set-defaultRest">${REST_OPTS.filter(Boolean).map(s => `<option value="${s}" ${st.defaultRest === s ? 'selected' : ''}>${fmtClock(s)}</option>`).join('')}</select></label>
-      ${sw('sound', 'Sound when rest ends')}
-      ${sw('vibrate', 'Vibrate when rest ends', 'Android only. iPhones don’t allow web apps to vibrate.')}
+      ${pushRowsHTML()}
+      ${sw('sound', 'Beep when rest ends', 'While Gym Log is open on screen.')}
+      ${st.sound ? sw('silentBeep', 'Beep in silent mode', 'Plays like music does, so silent mode won’t mute it. May briefly pause music from other apps.') : ''}
+      ${navigator.vibrate ? sw('vibrate', 'Vibrate when rest ends') : ''}
       ${sw('wakeLock', 'Keep screen on during workouts')}
-      <button class="row-item" data-act="test-alert"><span>Test the alert</span>${icon('chev', 18)}</button>
+      <button class="row-item" data-act="test-alert"><span>Test the beep</span>${icon('chev', 18)}</button>
     </div>
     <div class="section-head"><h2>Exercises</h2></div>
     <div class="card list"><button class="row-item" data-act="open" data-screen="exercises"><span>Manage exercises</span><span class="meta">${S.all('exercises').length} ${icon('chev', 18)}</span></button></div>
@@ -1049,6 +1074,20 @@ function viewSettings() {
         : `<button class="row-item" data-act="check-update"><span>Check for updates</span>${icon('chev', 18)}</button>`}
       <button class="row-item" data-act="apply-update-force"><span>Reload latest version<small class="faint block">Re-downloads the app if something looks out of date. Your data isn’t touched.</small></span>${icon('chev', 18)}</button>
     </div>`;
+}
+
+// ---------- lock-screen alerts UI ----------
+let pushBusy = false;
+function pushRowsHTML() {
+  const on = Push.enabled();
+  let note, blocked = false;
+  if (!Push.supported()) { blocked = true; note = Push.needsHomeScreen() ? 'Open Gym Log from your home screen to use this.' : 'Not available in this browser.'; }
+  else if (!Sync.user()) { blocked = true; note = 'Sign in to cloud sync first (below).'; }
+  else if (Push.permission() === 'denied') { blocked = true; note = 'Blocked. Turn on in iPhone Settings → Notifications → Gym Log.'; }
+  else note = 'Buzzes your phone when rest ends, even when it’s locked or in silent mode. Needs a connection when you log the set.';
+  return `<label class="row-item"><span>Lock screen alerts<small class="faint block">${note}</small></span>
+      <input type="checkbox" class="switch" data-bind="push" ${on ? 'checked' : ''} ${(blocked && !on) || pushBusy ? 'disabled' : ''}></label>
+    ${on ? `<button class="row-item" data-act="test-push"><span>Send a test alert<small class="faint block">Arrives in about 5 seconds. Lock your phone to see it.</small></span>${icon('chev', 18)}</button>` : ''}`;
 }
 
 // ---------- sync UI ----------
@@ -1098,7 +1137,7 @@ function updateSyncCard() {
 // ---------- app updates ----------
 // version.json is always fetched live (the offline layer never caches it). If it names a newer
 // version than this code, show an "Update available" banner; tapping it downloads fresh files and reloads.
-const APP_FILES = ['./', 'index.html', 'css/styles.css', 'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/config.js', 'manifest.webmanifest'];
+const APP_FILES = ['./', 'index.html', 'css/styles.css', 'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/push.js', 'js/config.js', 'manifest.webmanifest'];
 let updateInfo = null;      // { version } when a newer version is published
 let updating = false;
 let lastUpdateCheck = 0;
@@ -1289,7 +1328,8 @@ const ACTIONS = {
     const d = Number(el.dataset.d);
     rest.endAt += d * 1000; rest.total = Math.max(1, rest.total + d);
     S.setMeta('rest', rest);
-    if (rest.endAt <= Date.now()) clearRest(); else renderRest();
+    if (rest.endAt <= Date.now()) clearRest();
+    else { renderRest(); Push.scheduleAt(rest.endAt, restAlertText(rest.label)); }
   },
   'rest-skip': () => clearRest(),
   finish: async () => {
@@ -1477,7 +1517,11 @@ const ACTIONS = {
   },
 
   // settings
-  'test-alert': () => { unlockAudio(); setTimeout(restAlert, 50); toast('Rest alert'); },
+  'test-alert': () => { unlockAudio(); setTimeout(restAlert, 80); toast('Beep!'); },
+  'test-push': () => {
+    Push.scheduleAt(Date.now() + 5000, 'Test alert. This is what “rest over” looks like.');
+    toast('Test alert in 5 seconds. Lock your phone now.');
+  },
   export: () => {
     const blob = new Blob([JSON.stringify(S.exportAll(), null, 1)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1524,7 +1568,22 @@ const BINDS = {
   'x-rest': el => { exDraft.rest = Number(el.value); },
   bw: el => { bwInput = el.value; },
   'set-defaultRest': el => S.setSettings({ defaultRest: Number(el.value) }),
-  'set-sound': el => S.setSettings({ sound: el.checked }),
+  'set-sound': el => { S.setSettings({ sound: el.checked }); render(); },
+  'set-silentBeep': el => S.setSettings({ silentBeep: el.checked }),
+  push: async el => {
+    if (pushBusy) return;
+    const want = el.checked;
+    pushBusy = true;
+    try {
+      if (want) { await Push.enable(); toast('Lock screen alerts on'); }
+      else { await Push.disable(); toast('Lock screen alerts off'); }
+    } catch (err) {
+      el.checked = !want;
+      toast(err instanceof TypeError ? 'Can’t reach the server. Check your connection.' : (err.message || 'Couldn’t turn on alerts'));
+    }
+    pushBusy = false;
+    render();
+  },
   'set-vibrate': el => S.setSettings({ vibrate: el.checked }),
   'set-wakeLock': el => { S.setSettings({ wakeLock: el.checked }); syncWakeLock(); },
 };

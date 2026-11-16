@@ -1,3 +1,6 @@
 # local tooling, not part of the app
 .claude/
 *.log
+
+# secrets generated on this computer (push keys, setup SQL with secrets) — never publish
+*.local.*
