@@ -2,7 +2,7 @@
 // in the background. Every download asks the server for the newest file ("no-cache" / "reload"),
 // so a fresh publish is never hidden behind the browser's own short-term cache.
 // Bump CACHE whenever you publish (and bump version.json + VERSION in js/app.js).
-const CACHE = 'gym-log-v8';
+const CACHE = 'gym-log-v9';
 const ASSETS = [
   './', 'index.html', 'css/styles.css',
   'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/push.js', 'js/config.js',

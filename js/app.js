@@ -4,7 +4,7 @@ import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 import * as Push from './push.js';
 
-const VERSION = '1.4.2'; // keep in step with version.json when publishing
+const VERSION = '1.4.3'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -461,12 +461,12 @@ function beep() {
   const play = () => { playTones(); audioGoIdleSoon(); };
   if (actx.state !== 'running') actx.resume().then(play).catch(play); else play();
 }
-// Beep volume presets. Louder = higher level, a pitch where ears/earbuds are most sensitive,
+// Beep volume presets: same familiar pitch (A5 then D6), louder = higher level,
 // tones held at full level instead of fading, and a richer waveform for "max".
 const BEEP_LEVELS = {
   normal: { label: 'Normal', type: 'sine', freqs: [880, 880, 1175], gain: 0.3, len: 0.17, gap: 0.05 },
-  loud: { label: 'Loud', type: 'triangle', freqs: [1568, 1568, 2093], gain: 0.95, len: 0.2, gap: 0.06 },
-  max: { label: 'Max', type: 'square', freqs: [1760, 1760, 2349, 2349], gain: 0.95, len: 0.22, gap: 0.05 },
+  loud: { label: 'Loud', type: 'triangle', freqs: [880, 880, 1175], gain: 0.95, len: 0.2, gap: 0.06 },
+  max: { label: 'Max', type: 'square', freqs: [880, 880, 1175, 1175], gain: 0.95, len: 0.22, gap: 0.05 },
 };
 const beepLevel = () => (BEEP_LEVELS[S.settings().beepVolume] ? S.settings().beepVolume : 'loud');
 
@@ -1101,9 +1101,9 @@ function viewSettings() {
 
 // ---------- beep style ----------
 const BEEP_MODES = {
-  over: { label: 'Over music', note: 'Briefly lowers your music instead of pausing it.' },
+  over: { label: 'Over music', note: 'Plays on top of your music without pausing it. Works in silent mode.' },
   silent: { label: 'Silent mode', note: 'Plays even in silent mode, but pauses music from other apps.' },
-  normal: { label: 'Normal', note: 'Follows the silent switch, so no beep in silent mode.' },
+  normal: { label: 'Normal', note: 'Plays on top of your music, but silent mode mutes it.' },
 };
 function beepMode() {
   const st = S.settings();
