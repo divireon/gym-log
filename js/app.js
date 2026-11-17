@@ -4,7 +4,7 @@ import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 import * as Push from './push.js';
 
-const VERSION = '1.4.0'; // keep in step with version.json when publishing
+const VERSION = '1.4.1'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -454,7 +454,10 @@ function unlockAudio() {
 function beep() {
   if (!actx) return;
   clearTimeout(audioIdle);
-  if (S.settings().silentBeep) setAudioSession('playback');
+  // over = short alert that dips other audio; silent = plays like music (ignores silent mode, pauses music)
+  const mode = beepMode();
+  if (mode === 'silent') setAudioSession('playback');
+  else if (mode === 'over') setAudioSession('transient');
   const play = () => { playTones(); audioGoIdleSoon(); };
   if (actx.state !== 'running') actx.resume().then(play).catch(play); else play();
 }
@@ -1046,7 +1049,7 @@ function viewSettings() {
         <select class="select-sm" data-bind="set-defaultRest">${REST_OPTS.filter(Boolean).map(s => `<option value="${s}" ${st.defaultRest === s ? 'selected' : ''}>${fmtClock(s)}</option>`).join('')}</select></label>
       ${pushRowsHTML()}
       ${sw('sound', 'Beep when rest ends', 'While Gym Log is open on screen.')}
-      ${st.sound ? sw('silentBeep', 'Beep in silent mode', 'Plays like music does, so silent mode won’t mute it. May briefly pause music from other apps.') : ''}
+      ${st.sound ? beepModeHTML() : ''}
       ${navigator.vibrate ? sw('vibrate', 'Vibrate when rest ends') : ''}
       ${sw('wakeLock', 'Keep screen on during workouts')}
       <button class="row-item" data-act="test-alert"><span>Test the beep</span>${icon('chev', 18)}</button>
@@ -1074,6 +1077,22 @@ function viewSettings() {
         : `<button class="row-item" data-act="check-update"><span>Check for updates</span>${icon('chev', 18)}</button>`}
       <button class="row-item" data-act="apply-update-force"><span>Reload latest version<small class="faint block">Re-downloads the app if something looks out of date. Your data isn’t touched.</small></span>${icon('chev', 18)}</button>
     </div>`;
+}
+
+// ---------- beep style ----------
+const BEEP_MODES = {
+  over: { label: 'Over music', note: 'Briefly lowers your music instead of pausing it.' },
+  silent: { label: 'Silent mode', note: 'Plays even in silent mode, but pauses music from other apps.' },
+  normal: { label: 'Normal', note: 'Follows the silent switch, so no beep in silent mode.' },
+};
+function beepMode() {
+  const st = S.settings();
+  return BEEP_MODES[st.beepMode] ? st.beepMode : 'over';
+}
+function beepModeHTML() {
+  const m = beepMode();
+  return `<div class="row-item stacked"><span>Beep style<small class="faint block">${BEEP_MODES[m].note}</small></span>
+    <div class="seg">${Object.entries(BEEP_MODES).map(([k, v]) => `<button class="${k === m ? 'on' : ''}" data-act="beep-mode" data-m="${k}">${v.label}</button>`).join('')}</div></div>`;
 }
 
 // ---------- lock-screen alerts UI ----------
@@ -1518,6 +1537,7 @@ const ACTIONS = {
 
   // settings
   'test-alert': () => { unlockAudio(); setTimeout(restAlert, 80); toast('Beep!'); },
+  'beep-mode': el => { S.setSettings({ beepMode: el.dataset.m }); render(); },
   'test-push': () => {
     Push.scheduleAt(Date.now() + 5000, 'Test alert. This is what “rest over” looks like.');
     toast('Test alert in 5 seconds. Lock your phone now.');
@@ -1569,7 +1589,7 @@ const BINDS = {
   bw: el => { bwInput = el.value; },
   'set-defaultRest': el => S.setSettings({ defaultRest: Number(el.value) }),
   'set-sound': el => { S.setSettings({ sound: el.checked }); render(); },
-  'set-silentBeep': el => S.setSettings({ silentBeep: el.checked }),
+  'set-silentBeep': el => S.setSettings({ silentBeep: el.checked }), // older builds
   push: async el => {
     if (pushBusy) return;
     const want = el.checked;
