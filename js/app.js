@@ -4,7 +4,7 @@ import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 import * as Push from './push.js';
 
-const VERSION = '1.4.1'; // keep in step with version.json when publishing
+const VERSION = '1.4.2'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -461,17 +461,37 @@ function beep() {
   const play = () => { playTones(); audioGoIdleSoon(); };
   if (actx.state !== 'running') actx.resume().then(play).catch(play); else play();
 }
-function playTones() {
-  const t = actx.currentTime;
-  [0, 0.22, 0.44].forEach((d, i) => {
+// Beep volume presets. Louder = higher level, a pitch where ears/earbuds are most sensitive,
+// tones held at full level instead of fading, and a richer waveform for "max".
+const BEEP_LEVELS = {
+  normal: { label: 'Normal', type: 'sine', freqs: [880, 880, 1175], gain: 0.3, len: 0.17, gap: 0.05 },
+  loud: { label: 'Loud', type: 'triangle', freqs: [1568, 1568, 2093], gain: 0.95, len: 0.2, gap: 0.06 },
+  max: { label: 'Max', type: 'square', freqs: [1760, 1760, 2349, 2349], gain: 0.95, len: 0.22, gap: 0.05 },
+};
+const beepLevel = () => (BEEP_LEVELS[S.settings().beepVolume] ? S.settings().beepVolume : 'loud');
+
+let limiter = null;
+function playTones(level = beepLevel()) {
+  const p = BEEP_LEVELS[level];
+  if (!limiter) {
+    // keeps the loud presets as loud as possible without crackling/clipping
+    limiter = actx.createDynamicsCompressor();
+    limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20;
+    limiter.attack.value = 0.002; limiter.release.value = 0.05;
+    limiter.connect(actx.destination);
+  }
+  const t = actx.currentTime + 0.02;
+  p.freqs.forEach((f, i) => {
+    const start = t + i * (p.len + p.gap);
     const o = actx.createOscillator(), g = actx.createGain();
-    o.type = 'sine';
-    o.frequency.value = i === 2 ? 1175 : 880;
-    g.gain.setValueAtTime(0.0001, t + d);
-    g.gain.exponentialRampToValueAtTime(0.3, t + d + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.17);
-    o.connect(g).connect(actx.destination);
-    o.start(t + d); o.stop(t + d + 0.2);
+    o.type = p.type;
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0, start);
+    g.gain.linearRampToValueAtTime(p.gain, start + 0.008);       // quick attack
+    g.gain.setValueAtTime(p.gain, start + p.len - 0.03);         // hold at full level
+    g.gain.linearRampToValueAtTime(0, start + p.len);            // short release, no click
+    o.connect(g).connect(limiter);
+    o.start(start); o.stop(start + p.len + 0.01);
   });
 }
 function restAlert() {
@@ -1049,7 +1069,7 @@ function viewSettings() {
         <select class="select-sm" data-bind="set-defaultRest">${REST_OPTS.filter(Boolean).map(s => `<option value="${s}" ${st.defaultRest === s ? 'selected' : ''}>${fmtClock(s)}</option>`).join('')}</select></label>
       ${pushRowsHTML()}
       ${sw('sound', 'Beep when rest ends', 'While Gym Log is open on screen.')}
-      ${st.sound ? beepModeHTML() : ''}
+      ${st.sound ? beepVolumeHTML() + beepModeHTML() : ''}
       ${navigator.vibrate ? sw('vibrate', 'Vibrate when rest ends') : ''}
       ${sw('wakeLock', 'Keep screen on during workouts')}
       <button class="row-item" data-act="test-alert"><span>Test the beep</span>${icon('chev', 18)}</button>
@@ -1093,6 +1113,12 @@ function beepModeHTML() {
   const m = beepMode();
   return `<div class="row-item stacked"><span>Beep style<small class="faint block">${BEEP_MODES[m].note}</small></span>
     <div class="seg">${Object.entries(BEEP_MODES).map(([k, v]) => `<button class="${k === m ? 'on' : ''}" data-act="beep-mode" data-m="${k}">${v.label}</button>`).join('')}</div></div>`;
+}
+
+function beepVolumeHTML() {
+  const v = beepLevel();
+  return `<div class="row-item stacked"><span>Beep volume<small class="faint block">Tap one to hear it. Your phone’s volume still applies.</small></span>
+    <div class="seg">${Object.entries(BEEP_LEVELS).map(([k, p]) => `<button class="${k === v ? 'on' : ''}" data-act="beep-volume" data-v="${k}">${p.label}</button>`).join('')}</div></div>`;
 }
 
 // ---------- lock-screen alerts UI ----------
@@ -1538,6 +1564,7 @@ const ACTIONS = {
   // settings
   'test-alert': () => { unlockAudio(); setTimeout(restAlert, 80); toast('Beep!'); },
   'beep-mode': el => { S.setSettings({ beepMode: el.dataset.m }); render(); },
+  'beep-volume': el => { S.setSettings({ beepVolume: el.dataset.v }); render(); unlockAudio(); setTimeout(beep, 80); },
   'test-push': () => {
     Push.scheduleAt(Date.now() + 5000, 'Test alert. This is what “rest over” looks like.');
     toast('Test alert in 5 seconds. Lock your phone now.');
