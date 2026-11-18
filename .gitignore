@@ -1,5 +1,6 @@
-# local tooling, not part of the app
-.claude/
+# local tooling, not part of the app (except the shared preview config)
+.claude/*
+!.claude/launch.json
 *.log
 
 # secrets generated on this computer (push keys, setup SQL with secrets) — never publish
