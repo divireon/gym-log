@@ -108,7 +108,7 @@ export async function api(method, path, body, headers = {}, retry = true) {
 let running = false, again = false, timer = null;
 
 export async function syncNow() {
-  if (!configured() || !session()) return;
+  if (!configured() || !session() || S.isDemo()) return; // never sync while the tutorial's sample data is loaded
   if (running) { again = true; return; }
   if (navigator.onLine === false) { setStatus('offline'); return; }
   running = true;

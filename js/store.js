@@ -19,15 +19,34 @@ function load() {
 }
 load();
 
+// ---- demo mode (tutorial) ----
+// Swaps in sample data held only in memory. While it's on, nothing is written to storage and the
+// sync layer stands down, so the real data on the device is never touched. Exiting reloads it.
+let demo = false;
+export const isDemo = () => demo;
+export function enterDemo(data) {
+  demo = true;
+  db = data;
+  for (const c of COLLS) if (!db[c] || typeof db[c] !== 'object') db[c] = {};
+  meta = { outbox: {} };
+  emit();
+}
+export function exitDemo() {
+  demo = false;
+  load();
+  emit();
+}
+
 let warned = false;
 function saveData() {
+  if (demo) return;
   try { localStorage.setItem(DATA_KEY, JSON.stringify(db)); }
   catch (err) {
     console.error(err);
     if (!warned) { warned = true; alert('Could not save: device storage may be full. Export a backup from Settings.'); }
   }
 }
-function saveMeta() { try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch {} }
+function saveMeta() { if (demo) return; try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch {} }
 function emit(c) { for (const fn of listeners) { try { fn(c); } catch (e) { console.error(e); } } }
 
 export function uid() {

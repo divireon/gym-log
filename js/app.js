@@ -3,8 +3,10 @@ import { SEED_EXERCISES } from './seed.js';
 import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 import * as Push from './push.js';
+import { buildDemo } from './demo.js';
+import * as Tour from './tour.js';
 
-const VERSION = '1.6.2'; // keep in step with version.json when publishing
+const VERSION = '1.7.0'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -85,6 +87,7 @@ const P = {
   run: '<circle cx="15" cy="4.5" r="1.8"/><path d="M7 21l3.2-6.2L13.5 17v4M5.5 11.5l3-3.5 4.5 1 2 3.5 3.5 1M10.2 14.8l1.3-5.3"/>',
   trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0V4zM8 6H5v1.5A3 3 0 0 0 8 10.5M16 6h3v1.5a3 3 0 0 1-3 3M12 13v4M8.5 20h7M10 17h4"/>',
   cloud: '<path d="M7 18h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.3 9.6 4.2 4.2 0 0 0 7 18z"/>',
+  play: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z"/>',
 };
 const icon = (n, s = 22) => `<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
 
@@ -1160,7 +1163,9 @@ function viewSettings() {
   const sw = (key, label, note = '') => `<label class="row-item"><span>${label}${note ? `<small class="faint block">${note}</small>` : ''}</span><input type="checkbox" class="switch" data-bind="set-${key}" ${st[key] ? 'checked' : ''}></label>`;
   return `<header class="top"><h1>Settings</h1></header>
     ${updateBanner()}
-    <div class="section-head first"><h2>Rest timer</h2></div>
+    <button class="card tour-cta" data-act="start-tour">${icon('play', 26)}
+      <span><b>Take the tour</b><small>Every feature in about 2 minutes, using sample workouts. Your own data isn’t touched.</small></span>${icon('chev', 18)}</button>
+    <div class="section-head"><h2>Rest timer</h2></div>
     <div class="card list">
       <label class="row-item"><span>Default rest for new exercises</span>
         <select class="select-sm" data-bind="set-defaultRest">${REST_OPTS.filter(Boolean).map(s => `<option value="${s}" ${st.defaultRest === s ? 'selected' : ''}>${fmtClock(s)}</option>`).join('')}</select></label>
@@ -1254,7 +1259,7 @@ function updateSyncCard() {
 // ---------- app updates ----------
 // version.json is always fetched live (the offline layer never caches it). If it names a newer
 // version than this code, show an "Update available" banner; tapping it downloads fresh files and reloads.
-const APP_FILES = ['./', 'index.html', 'css/styles.css', 'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/push.js', 'js/config.js', 'manifest.webmanifest'];
+const APP_FILES = ['./', 'index.html', 'css/styles.css', 'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/push.js', 'js/demo.js', 'js/tour.js', 'js/config.js', 'manifest.webmanifest'];
 let updateInfo = null;      // { version } when a newer version is published
 let updating = false;
 let lastUpdateCheck = 0;
@@ -1433,6 +1438,7 @@ const ACTIONS = {
     if (row) ACTIONS['toggle-set'](row);
   },
   'dismiss-tip': () => { S.setMeta('tipLogFlow', true); render(); },
+  'start-tour': () => startTutorial(),
   'add-set': el => {
     const w = activeWorkout(); const { en } = findSet(w, el);
     if (!en) return;
@@ -1768,6 +1774,80 @@ document.addEventListener('submit', async e => {
   updateSyncCardForce();
 });
 function updateSyncCardForce() { const el = document.getElementById('sync-card'); if (el) el.innerHTML = syncCardHTML(); }
+
+// ---------- tutorial ----------
+// Loads sample data (in memory only), then walks through every feature on the real screens.
+function tourActive() {
+  const w = activeWorkout();
+  if (!w) startWorkout(S.all('routines').find(r => r.name === 'Push Day'));
+  else go('workout');
+  return activeWorkout();
+}
+function tourSetDone() {
+  const w = tourActive(), en = w.entries[0], s = en.sets[0];
+  if (!s.done) {
+    const btn = document.querySelector(`[data-entry="${en.id}"] [data-set="${s.id}"] [data-act="toggle-set"]`);
+    if (btn) ACTIONS['toggle-set'](btn);
+  }
+  return w;
+}
+function tourHome() {
+  const w = activeWorkout();
+  if (w) { S.remove('workouts', w.id); S.setMeta('activeWorkoutId', null); }
+  clearRest();
+  go('workout');
+}
+const sectionCard = title => {
+  const h = [...document.querySelectorAll('.section-head h2')].find(x => x.textContent.trim() === title);
+  let n = h && h.parentElement.nextElementSibling;
+  while (n && !n.classList.contains('card')) n = n.nextElementSibling;
+  return n;
+};
+const firstSet = () => document.querySelector('.entry .set');
+
+const TOUR_STEPS = [
+  { title: 'Welcome to Gym Log', text: 'This quick tour shows everything the app can do. It uses <b>sample workouts</b>, so nothing you see here is saved, and your real data comes back when the tour ends.', before: tourHome },
+  { target: '.stats3', title: 'Your week at a glance', text: 'How many times you trained this week, how many weeks in a row you’ve kept it up, and your total sessions.', before: tourHome },
+  { target: '[data-act="start"]:not([data-routine])', title: 'Start a workout', text: 'Start from scratch and add exercises as you go. There are 40 common lifts built in, and you can add your own.', before: tourHome },
+  { target: '[data-act="open"][data-screen="run"]', title: 'Log a run', text: 'Use the stopwatch or type in your time and distance. The app works out your pace.', before: tourHome },
+  { target: '.card.routine', title: 'Routines', text: 'Save your usual workouts, like <b>Push Day</b>. Tap <b>Start</b> and every exercise is ready to go, with your weights from last time.', before: tourHome },
+  { target: '.entry .sug', title: 'It tells you what to lift', text: 'Based on last time, the app suggests your next step: <b>add a rep</b>, or once you hit the top of your rep range, <b>add weight</b>. (The tour just started Push Day for you.)', before: tourActive },
+  { target: firstSet, title: 'Each row is a set', text: '<b>Last time</b> shows what you did before. The grey numbers are today’s targets, filled in for you.', before: tourActive },
+  { target: '.entry .set .check', title: 'Tap ✓ when you finish a set', text: 'One tap logs the set with those numbers. No typing needed if you hit the target.', before: tourActive },
+  { target: '#rest', title: 'Rest timer starts by itself', text: 'Tapping ✓ starts your rest countdown. Use <b>−15 / +15</b> to adjust, or <b>Skip</b>. With lock-screen alerts on, your phone <b>buzzes when rest is over</b>, even locked in your pocket.', before: tourSetDone },
+  { target: '.sheet-panel', keepSheet: true, title: 'Did something different?', text: 'Tap any number to fix it with big <b>+ / −</b> buttons. You can do this during your rest, and the timer keeps running.', before: () => { const w = tourSetDone(); openSetSheet(w.entries[0].id, w.entries[0].sets[0].id, 'lb'); } },
+  { target: '.entry .chip', title: 'Rest time per exercise', text: 'Each exercise remembers its own rest time, like 3 minutes for bench and 1 minute for curls. Tap to change it.', before: tourActive },
+  { target: '[data-act="finish"]', title: 'Finish', text: 'When you’re done, tap <b>Finish</b> for a summary of your sets, total weight lifted, and any new personal records.', before: tourActive },
+  { target: '.card.hist', title: 'History', text: 'Every workout and run is saved here, newest first. Tap one to see every set.', before: () => { tourHome(); go('history'); } },
+  { target: '.card.goal', title: 'Goals', text: 'Set targets like <b>Bench 185 lb</b>, a body weight, a run distance or workouts per week, and watch the bar fill up.', before: () => { tourHome(); go('progress'); } },
+  { target: () => document.querySelector('.heatmap')?.closest('.card'), title: 'Consistency', text: 'Each square is a day. Green means you trained. It’s an easy way to see your streaks.', before: () => go('progress') },
+  { target: '.pr-row', title: 'Strength & records', text: 'Your best set and estimated one-rep max for every exercise, with a mini trend line. Tap one for the full chart.', before: () => go('progress') },
+  { target: '.next-card', title: 'Exercise details', text: 'Each exercise shows what to aim for next session, your records, a strength chart over time, and every past session.', before: () => { go('progress'); open('exercise', 'ex_bench_press_barbell'); } },
+  { target: () => sectionCard('Workout length'), title: 'Workout length', text: 'How long your sessions take: average, longest, and your total time this month.', before: () => go('progress') },
+  { target: () => sectionCard('Running'), title: 'Running', text: 'Miles this month, best pace, longest run, and a chart of your pace or distance over time.', before: () => go('progress') },
+  { target: () => { const c = sectionCard('Body weight'); return (c && c.querySelector('.chart')) || c; }, title: 'Body weight', text: 'Log your weight whenever you like and see the trend, plus how much it changed this month.', before: () => go('progress') },
+  { target: () => document.querySelector('[data-bind="push"]')?.closest('.row-item'), title: 'Lock-screen alerts', text: 'Turn this on and your phone buzzes when rest is over, even when it’s locked or on silent.', before: () => go('settings') },
+  { target: '#sync-card', title: 'Cloud sync', text: 'Sign in and your workouts sync between your phone and computer. Everything works offline too and catches up when you’re back online.', before: () => go('settings') },
+  { title: 'That’s it!', text: 'Tap <b>Done</b> to leave the tour and get back to your own data. You can replay it any time from <b>Settings</b>.', before: () => go('settings') },
+];
+
+function startTutorial() {
+  if (Tour.running()) return;
+  if (!sheetEl.hidden) closeSheet();
+  S.enterDemo(buildDemo().db);
+  S.setMeta('tipLogFlow', true);   // the tour explains it instead
+  rest = null; restMode = null; renderRest();
+  Tour.startTour(TOUR_STEPS, {
+    closeSheets: () => { if (!sheetEl.hidden) closeSheet(); },
+    onExit: () => {
+      if (!sheetEl.hidden) closeSheet();
+      S.exitDemo();
+      rest = S.getMeta('rest') || null; restMode = null; renderRest();
+      go('settings');
+      toast('Tour finished. Your own data is back.');
+    },
+  });
+}
 
 // ---------- go ----------
 render();

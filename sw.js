@@ -2,10 +2,10 @@
 // in the background. Every download asks the server for the newest file ("no-cache" / "reload"),
 // so a fresh publish is never hidden behind the browser's own short-term cache.
 // Bump CACHE whenever you publish (and bump version.json + VERSION in js/app.js).
-const CACHE = 'gym-log-v13';
+const CACHE = 'gym-log-v14';
 const ASSETS = [
   './', 'index.html', 'css/styles.css',
-  'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/push.js', 'js/config.js',
+  'js/app.js', 'js/store.js', 'js/seed.js', 'js/charts.js', 'js/sync.js', 'js/push.js', 'js/demo.js', 'js/tour.js', 'js/config.js',
   'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 

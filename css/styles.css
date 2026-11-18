@@ -401,3 +401,35 @@ input[type="date"].input { -webkit-appearance: none; appearance: none; min-heigh
   .set-grid { grid-template-columns: 22px minmax(0, 1fr) 58px 48px 34px; gap: 5px; }
   .stat b { font-size: 18px; }
 }
+
+/* tutorial entry point */
+.tour-cta { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px; margin: 0 0 4px; color: var(--accent); }
+.tour-cta span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tour-cta b { color: var(--text); font-size: 16px; }
+.tour-cta small { color: var(--muted); font-size: 13px; line-height: 1.35; }
+.tour-cta > .i:last-child { color: var(--faint); }
+
+/* guided tour overlay: blocks the app, spotlights one element, caption card on the roomier side */
+#tour { position: fixed; inset: 0; z-index: 60; touch-action: none; }
+.tour-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, .74); }
+.tour-spot {
+  position: absolute; border-radius: 12px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, .74), 0 0 0 2px var(--accent);
+  transition: top .25s ease, left .25s ease, width .25s ease, height .25s ease;
+}
+.tour-card {
+  position: absolute; left: 12px; right: 12px; max-width: 520px; margin: 0 auto;
+  background: var(--surface-3); border: 1px solid #2c333a; border-radius: 16px;
+  padding: 12px 16px 14px; box-shadow: 0 16px 40px rgba(0, 0, 0, .6);
+}
+.tour-card.at-top { top: calc(var(--safe-t) + 12px); }
+.tour-card.at-bottom { bottom: calc(var(--safe-b) + 12px); }
+.tour-card.center { top: 50%; transform: translateY(-50%); }
+.tour-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.tour-count { font-size: 12px; font-weight: 600; color: var(--muted); }
+.tour-x { font-size: 13px; color: var(--muted); padding: 6px 4px 6px 10px; }
+.tour-card h3 { font-size: 18px; margin: 0 0 6px; }
+.tour-card p { color: var(--muted); font-size: 15px; line-height: 1.45; }
+.tour-card p b { color: var(--text); font-weight: 600; }
+.tour-btns { display: flex; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.tour-btns .btn { min-width: 104px; }
