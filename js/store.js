@@ -64,7 +64,7 @@ export function seed(c, rec) {
 export function commit() { saveData(); saveMeta(); emit(); }
 
 // ---- settings (stored as a synced record) ----
-const DEFAULT_SETTINGS = { id: 'main', defaultRest: 90, sound: true, beepMode: 'over', beepVolume: 'loud', vibrate: true, wakeLock: true };
+const DEFAULT_SETTINGS = { id: 'main', defaultRest: 90, vibrate: true, wakeLock: true };
 export function settings() { return { ...DEFAULT_SETTINGS, ...(db.settings.main || {}) }; }
 export function setSettings(patch) { put('settings', { ...settings(), ...patch, id: 'main' }); }
 

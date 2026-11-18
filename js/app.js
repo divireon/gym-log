@@ -4,7 +4,7 @@ import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 import * as Push from './push.js';
 
-const VERSION = '1.4.3'; // keep in step with version.json when publishing
+const VERSION = '1.5.0'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -433,70 +433,8 @@ function renderRest(now = Date.now()) {
   }
 }
 
-// Audio: iPhones mute web audio in silent mode unless the page says it's playing like a music app
-// ("playback" audio session). We only switch to that for the beep itself, then let the audio go idle
-// again so music from other apps isn't held up.
-let actx = null, audioIdle = null;
-function setAudioSession(type) { try { if (navigator.audioSession) navigator.audioSession.type = type; } catch {} }
-function audioGoIdleSoon(ms = 1500) {
-  clearTimeout(audioIdle);
-  audioIdle = setTimeout(() => {
-    try { if (actx && actx.state === 'running') actx.suspend(); } catch {}
-    setAudioSession('auto');
-  }, ms);
-}
-function unlockAudio() {
-  try {
-    if (!actx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return; actx = new C(); }
-    if (actx.state !== 'running') actx.resume().then(() => audioGoIdleSoon()).catch(() => {});
-  } catch {}
-}
-function beep() {
-  if (!actx) return;
-  clearTimeout(audioIdle);
-  // over = short alert that dips other audio; silent = plays like music (ignores silent mode, pauses music)
-  const mode = beepMode();
-  if (mode === 'silent') setAudioSession('playback');
-  else if (mode === 'over') setAudioSession('transient');
-  const play = () => { playTones(); audioGoIdleSoon(); };
-  if (actx.state !== 'running') actx.resume().then(play).catch(play); else play();
-}
-// Beep volume presets: same familiar pitch (A5 then D6), louder = higher level,
-// tones held at full level instead of fading, and a richer waveform for "max".
-const BEEP_LEVELS = {
-  normal: { label: 'Normal', type: 'sine', freqs: [880, 880, 1175], gain: 0.3, len: 0.17, gap: 0.05 },
-  loud: { label: 'Loud', type: 'triangle', freqs: [880, 880, 1175], gain: 0.95, len: 0.2, gap: 0.06 },
-  max: { label: 'Max', type: 'square', freqs: [880, 880, 1175, 1175], gain: 0.95, len: 0.22, gap: 0.05 },
-};
-const beepLevel = () => (BEEP_LEVELS[S.settings().beepVolume] ? S.settings().beepVolume : 'loud');
-
-let limiter = null;
-function playTones(level = beepLevel()) {
-  const p = BEEP_LEVELS[level];
-  if (!limiter) {
-    // keeps the loud presets as loud as possible without crackling/clipping
-    limiter = actx.createDynamicsCompressor();
-    limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20;
-    limiter.attack.value = 0.002; limiter.release.value = 0.05;
-    limiter.connect(actx.destination);
-  }
-  const t = actx.currentTime + 0.02;
-  p.freqs.forEach((f, i) => {
-    const start = t + i * (p.len + p.gap);
-    const o = actx.createOscillator(), g = actx.createGain();
-    o.type = p.type;
-    o.frequency.value = f;
-    g.gain.setValueAtTime(0, start);
-    g.gain.linearRampToValueAtTime(p.gain, start + 0.008);       // quick attack
-    g.gain.setValueAtTime(p.gain, start + p.len - 0.03);         // hold at full level
-    g.gain.linearRampToValueAtTime(0, start + p.len);            // short release, no click
-    o.connect(g).connect(limiter);
-    o.start(start); o.stop(start + p.len + 0.01);
-  });
-}
 function restAlert() {
   const st = S.settings();
-  if (st.sound) beep();
   if (st.vibrate && navigator.vibrate) navigator.vibrate([250, 120, 250]);
 }
 
@@ -1068,11 +1006,8 @@ function viewSettings() {
       <label class="row-item"><span>Default rest for new exercises</span>
         <select class="select-sm" data-bind="set-defaultRest">${REST_OPTS.filter(Boolean).map(s => `<option value="${s}" ${st.defaultRest === s ? 'selected' : ''}>${fmtClock(s)}</option>`).join('')}</select></label>
       ${pushRowsHTML()}
-      ${sw('sound', 'Beep when rest ends', 'While Gym Log is open on screen.')}
-      ${st.sound ? beepVolumeHTML() + beepModeHTML() : ''}
       ${navigator.vibrate ? sw('vibrate', 'Vibrate when rest ends') : ''}
       ${sw('wakeLock', 'Keep screen on during workouts')}
-      <button class="row-item" data-act="test-alert"><span>Test the beep</span>${icon('chev', 18)}</button>
     </div>
     <div class="section-head"><h2>Exercises</h2></div>
     <div class="card list"><button class="row-item" data-act="open" data-screen="exercises"><span>Manage exercises</span><span class="meta">${S.all('exercises').length} ${icon('chev', 18)}</span></button></div>
@@ -1097,28 +1032,6 @@ function viewSettings() {
         : `<button class="row-item" data-act="check-update"><span>Check for updates</span>${icon('chev', 18)}</button>`}
       <button class="row-item" data-act="apply-update-force"><span>Reload latest version<small class="faint block">Re-downloads the app if something looks out of date. Your data isn’t touched.</small></span>${icon('chev', 18)}</button>
     </div>`;
-}
-
-// ---------- beep style ----------
-const BEEP_MODES = {
-  over: { label: 'Over music', note: 'Plays on top of your music without pausing it. Works in silent mode.' },
-  silent: { label: 'Silent mode', note: 'Plays even in silent mode, but pauses music from other apps.' },
-  normal: { label: 'Normal', note: 'Plays on top of your music, but silent mode mutes it.' },
-};
-function beepMode() {
-  const st = S.settings();
-  return BEEP_MODES[st.beepMode] ? st.beepMode : 'over';
-}
-function beepModeHTML() {
-  const m = beepMode();
-  return `<div class="row-item stacked"><span>Beep style<small class="faint block">${BEEP_MODES[m].note}</small></span>
-    <div class="seg">${Object.entries(BEEP_MODES).map(([k, v]) => `<button class="${k === m ? 'on' : ''}" data-act="beep-mode" data-m="${k}">${v.label}</button>`).join('')}</div></div>`;
-}
-
-function beepVolumeHTML() {
-  const v = beepLevel();
-  return `<div class="row-item stacked"><span>Beep volume<small class="faint block">Tap one to hear it. Your phone’s volume still applies.</small></span>
-    <div class="seg">${Object.entries(BEEP_LEVELS).map(([k, p]) => `<button class="${k === v ? 'on' : ''}" data-act="beep-volume" data-v="${k}">${p.label}</button>`).join('')}</div></div>`;
 }
 
 // ---------- lock-screen alerts UI ----------
@@ -1562,9 +1475,6 @@ const ACTIONS = {
   },
 
   // settings
-  'test-alert': () => { unlockAudio(); setTimeout(restAlert, 80); toast('Beep!'); },
-  'beep-mode': el => { S.setSettings({ beepMode: el.dataset.m }); render(); },
-  'beep-volume': el => { S.setSettings({ beepVolume: el.dataset.v }); render(); unlockAudio(); setTimeout(beep, 80); },
   'test-push': () => {
     Push.scheduleAt(Date.now() + 5000, 'Test alert. This is what “rest over” looks like.');
     toast('Test alert in 5 seconds. Lock your phone now.');
@@ -1615,8 +1525,6 @@ const BINDS = {
   'x-rest': el => { exDraft.rest = Number(el.value); },
   bw: el => { bwInput = el.value; },
   'set-defaultRest': el => S.setSettings({ defaultRest: Number(el.value) }),
-  'set-sound': el => { S.setSettings({ sound: el.checked }); render(); },
-  'set-silentBeep': el => S.setSettings({ silentBeep: el.checked }), // older builds
   push: async el => {
     if (pushBusy) return;
     const want = el.checked;
@@ -1652,7 +1560,6 @@ function onSetInput(el) {
 }
 
 document.addEventListener('click', e => {
-  unlockAudio();
   const el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;
   const fn = ACTIONS[el.dataset.act];

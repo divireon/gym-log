@@ -239,9 +239,6 @@ input[type="date"].input { -webkit-appearance: none; appearance: none; min-heigh
   padding: 10px 14px; min-height: 46px; text-align: left; border-bottom: 1px solid var(--line); cursor: pointer;
 }
 .row-item:last-child { border-bottom: 0; }
-.row-item.stacked { flex-direction: column; align-items: stretch; gap: 10px; cursor: default; }
-.row-item.stacked .seg { display: flex; }
-.row-item.stacked .seg button { flex: 1; padding: 7px 6px; }
 .row-item .meta { display: flex; align-items: center; gap: 4px; color: var(--muted); flex: none; }
 .row-item > .i { color: var(--faint); }
 .switch {
