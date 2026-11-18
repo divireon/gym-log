@@ -153,10 +153,34 @@ p { margin: 0; }
 .set-in {
   width: 100%; height: 34px; border-radius: 8px; border: 1px solid transparent;
   background: var(--surface-2); text-align: center; font-size: 16px; font-weight: 600; outline: none; padding: 0 4px;
+  display: flex; align-items: center; justify-content: center; color: var(--text); white-space: nowrap; overflow: hidden;
 }
-.set-in:focus { border-color: var(--accent); background: var(--surface-3); }
-.set-in::placeholder { color: var(--faint); font-weight: 500; }
+.set-in:active { background: var(--surface-3); }
+.set-in.ph { color: var(--faint); font-weight: 500; }
 .set.done .set-in, .set.pr .set-in { background: transparent; }
+.set .set-in.need { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+/* one-time tip on the workout screen */
+.tip { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 10px; padding: 9px 4px 9px 12px; border-radius: 11px; background: var(--accent-soft); color: var(--accent); font-size: 13px; line-height: 1.4; }
+.tip .i { margin-top: 1px; }
+.tip span { flex: 1; color: var(--text); }
+.tip .icon-btn { width: 30px; height: 30px; margin-top: -4px; }
+
+/* set editor sheet */
+.ss-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.ss-title { font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
+.ss-rest { display: flex; align-items: center; gap: 5px; flex: none; font-size: 20px; font-weight: 700; color: var(--accent); }
+.ss-field { margin-bottom: 14px; }
+.ss-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 2px 6px; }
+.ss-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) 76px; gap: 8px; }
+.ss-btn { height: 58px; border-radius: 12px; background: var(--surface-2); font-size: 19px; font-weight: 700; }
+.ss-btn:active { background: var(--surface-3); transform: scale(.97); }
+.ss-val { width: 100%; height: 58px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); text-align: center; font-size: 28px; font-weight: 700; outline: none; padding: 0 6px; }
+.ss-val:focus { border-color: var(--accent); }
+.ss-fine { display: flex; justify-content: space-between; margin-top: 4px; }
+.ss-fine button { font-size: 13px; font-weight: 600; color: var(--muted); padding: 6px 12px; border-radius: 8px; }
+.ss-fine button:active { background: var(--surface-2); }
+.ss-actions { display: flex; gap: 8px; margin-top: 18px; }
 .check { width: 36px; height: 34px; border-radius: 8px; background: var(--surface-2); display: grid; place-items: center; color: var(--faint); transition: background .15s, color .15s; }
 .check b { font-size: 11px; letter-spacing: .03em; }
 .set.done .check { background: var(--good); color: var(--on-accent); }

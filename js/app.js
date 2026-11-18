@@ -4,7 +4,7 @@ import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 import * as Push from './push.js';
 
-const VERSION = '1.5.0'; // keep in step with version.json when publishing
+const VERSION = '1.6.0'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -151,14 +151,39 @@ function bests(exId, { skipSetId = null, excludeWorkout = null } = {}) {
   return b;
 }
 
-/** A set is a PR if it beats everything before it, and there IS history from other workouts. */
-function isPR(exId, set, wid) {
-  if (!bests(exId, { excludeWorkout: wid }).any) return false;
-  const prev = bests(exId, { skipSetId: set.id });
-  const t = exType(exId), lb = +set.lb || 0, reps = +set.reps || 0, sec = +set.sec || 0;
-  if (t === 'weight') return e1rm(lb, reps) > prev.e1rm + 0.01 || lb > prev.lb;
-  if (t === 'bodyweight') return reps > prev.reps || (lb > 0 && lb > prev.lb);
-  return sec > prev.sec;
+/** A checked set that still needs its numbers (✓ was tapped with empty boxes). */
+function setMissing(t, s) {
+  if (t === 'time') return !(+s.sec > 0);
+  return !(+s.reps > 0) || (t === 'weight' && (s.lb === '' || s.lb == null));
+}
+
+/**
+ * Re-mark personal records for one exercise in a workout, in the order sets were checked.
+ * A set is a PR if it beats all history from other workouts plus the sets checked before it
+ * (and only once there IS history). Returns true if a set newly became a PR.
+ */
+function recomputePRs(w, exId) {
+  const t = exType(exId);
+  const sets = w.entries.filter(en => en.exId === exId).flatMap(en => en.sets);
+  const before = new Set(sets.filter(s => s.pr).map(s => s.id));
+  sets.forEach(s => { s.pr = false; });
+  const hist = bests(exId, { excludeWorkout: w.id });
+  if (!hist.any) return false;
+  const run = { e1rm: hist.e1rm, lb: hist.lb, reps: hist.reps, sec: hist.sec };
+  let fresh = false;
+  sets.filter(s => s.done && !setMissing(t, s))
+    .sort((a, b) => (a.doneAt || 0) - (b.doneAt || 0))
+    .forEach(s => {
+      const lb = +s.lb || 0, reps = +s.reps || 0, sec = +s.sec || 0, e = e1rm(lb, reps);
+      const pr = t === 'weight' ? (e > run.e1rm + 0.01 || lb > run.lb)
+        : t === 'bodyweight' ? (reps > run.reps || (lb > 0 && lb > run.lb))
+          : sec > run.sec;
+      s.pr = pr;
+      if (pr && !before.has(s.id)) fresh = true;
+      run.e1rm = Math.max(run.e1rm, e); run.lb = Math.max(run.lb, lb);
+      run.reps = Math.max(run.reps, reps); run.sec = Math.max(run.sec, sec);
+    });
+  return fresh;
 }
 
 function wStats(w) {
@@ -391,6 +416,11 @@ function tick() {
     runEls.forEach(el => { el.textContent = t; });
     updatePace();
   }
+  const restEls = document.querySelectorAll('[data-clock="rest"]');
+  if (restEls.length) {
+    const left = rest ? (rest.endAt - now) / 1000 : 0;
+    restEls.forEach(el => { el.textContent = left > 0 ? fmtClock(Math.ceil(left)) : 'Rest over'; });
+  }
   renderRest(now);
 }
 setInterval(tick, 250);
@@ -475,6 +505,7 @@ function closeSheet() {
   sheetEl.innerHTML = '';
   document.body.classList.remove('no-scroll');
   if (s && s.kind === 'confirm') s.res(false);
+  if (s && s.onClose) s.onClose();
 }
 function confirmBox(title, msg, ok = 'OK', danger = false) {
   return new Promise(res => {
@@ -506,6 +537,107 @@ function renderPickList(q) {
       `<button class="pick-item" data-act="pick" data-id="${e.id}"><span>${esc(e.name)}</span><small>${TYPE_SHORT[e.type]}</small></button>`).join('');
   }
   list.innerHTML = h || '<p class="muted" style="padding:16px">No exercises found.</p>';
+}
+
+// ---------- set editor: big +/− buttons instead of the keyboard ----------
+const SET_STEPS = {
+  lb: { big: 5, fine: 2.5 },
+  reps: { big: 1, fine: 0 },
+  sec: { big: 15, fine: 5 },
+};
+
+function setSheetCtx() {
+  const st = sheetState, w = activeWorkout();
+  if (!st || st.kind !== 'set' || !w) return null;
+  const en = w.entries.find(x => x.id === st.entryId);
+  const j = en ? en.sets.findIndex(x => x.id === st.setId) : -1;
+  return en && j >= 0 ? { w, en, j, s: en.sets[j], t: exType(en.exId) } : null;
+}
+
+function openSetSheet(entryId, setId, focusField) {
+  const w = activeWorkout();
+  const en = w && w.entries.find(x => x.id === entryId);
+  const j = en ? en.sets.findIndex(x => x.id === setId) : -1;
+  if (j < 0) return;
+  const s = en.sets[j], t = exType(en.exId);
+  // start from what's logged, else the suggested target, else empty
+  const h = hintFor(en, j, targetsFor(en.exId, w.id));
+  const pick = f => (s[f] !== '' && s[f] != null ? s[f] : (h[f] !== '' && h[f] != null ? h[f] : ''));
+  const draft = t === 'time' ? { sec: pick('sec') } : { lb: pick('lb'), reps: pick('reps') };
+  openSheet('', { kind: 'set', entryId, setId, draft, focusField, onClose: () => render() });
+  renderSetSheet();
+}
+
+function renderSetSheet() {
+  const c = setSheetCtx();
+  const panel = sheetEl.querySelector('.sheet-panel');
+  if (!c || !panel) return;
+  const { en, j, s, t } = c, d = sheetState.draft;
+  const prev = lastSession(en.exId, c.w.id) || [];
+  const field = (f, label) => {
+    const st = SET_STEPS[f];
+    const shown = f === 'sec' ? (d.sec !== '' ? fmtClock(d.sec) : '') : num(d[f]);
+    const small = f === 'lb' ? (st.fine ? `<div class="ss-fine"><button data-act="ss-step" data-f="lb" data-d="-${st.fine}">−${st.fine}</button><button data-act="ss-step" data-f="lb" data-d="${st.fine}">+${st.fine}</button></div>` : '')
+      : f === 'sec' ? `<div class="ss-fine"><button data-act="ss-step" data-f="sec" data-d="-${st.fine}">−${st.fine}s</button><button data-act="ss-step" data-f="sec" data-d="${st.fine}">+${st.fine}s</button></div>` : '';
+    const unit = f === 'sec' ? 's' : '';
+    return `<div class="ss-field"><div class="ss-label">${label}</div>
+      <div class="ss-row">
+        <button class="ss-btn" data-act="ss-step" data-f="${f}" data-d="-${st.big}">−${st.big}${unit}</button>
+        <input class="ss-val" data-f="${f}" inputmode="${f === 'reps' ? 'numeric' : 'decimal'}" value="${esc(shown)}" placeholder="–" aria-label="${label}">
+        <button class="ss-btn" data-act="ss-step" data-f="${f}" data-d="${st.big}">+${st.big}${unit}</button>
+      </div>${small}</div>`;
+  };
+  const fields = t === 'time' ? field('sec', 'Time')
+    : field('lb', t === 'bodyweight' ? 'Added weight (lb)' : 'Weight (lb)') + field('reps', 'Reps');
+  const restOn = rest && rest.endAt > Date.now();
+  panel.innerHTML = `<div class="sheet-pad set-sheet">
+    <div class="ss-head">
+      <div style="min-width:0"><div class="ss-title clamp">${esc(exName(en.exId))}</div>
+        <div class="muted small">Set ${j + 1}${s.done ? ' · logged' : ''}${prev[j] ? ` · last time ${fmtSetShort(t, prev[j])}` : ''}</div></div>
+      ${restOn ? `<div class="ss-rest">${icon('timer', 16)}<span data-clock="rest"></span></div>` : ''}
+    </div>
+    ${fields}
+    <div class="ss-actions">
+      ${s.done ? `<button class="btn primary big block" data-act="close-sheet">Done</button>`
+        : `<button class="btn big" data-act="close-sheet">Close</button><button class="btn primary big block" data-act="ss-log">${icon('check', 18)} Log set</button>`}
+    </div>
+  </div>`;
+  tick();
+}
+
+/** Write the panel's numbers into the set (and re-check records if it's already logged). */
+function applySetDraft() {
+  const c = setSheetCtx();
+  if (!c) return;
+  Object.assign(c.s, sheetState.draft);
+  if (c.s.done) {
+    if (recomputePRs(c.w, c.en.exId)) toast('New personal record!', 'gold');
+    checkGoals();
+  }
+  S.put('workouts', c.w);
+}
+
+function setSheetStep(f, delta) {
+  if (!sheetState || sheetState.kind !== 'set') return;
+  const d = sheetState.draft;
+  let v = (+d[f] || 0) + delta;
+  v = f === 'lb' ? Math.max(0, Math.round(v * 100) / 100) : Math.max(0, Math.round(v));
+  d[f] = v;
+  applySetDraft();
+  renderSetSheet();
+}
+
+function onSetSheetInput(el) {
+  if (!sheetState || sheetState.kind !== 'set') return;
+  const f = el.dataset.f, v = el.value.trim();
+  if (f === 'sec') {
+    const sec = parseClock(v, 'sec');
+    sheetState.draft.sec = v === '' ? '' : (sec ?? sheetState.draft.sec);
+  } else {
+    const n = parseFloat(v.replace(',', '.'));
+    sheetState.draft[f] = v === '' ? '' : (isNaN(n) ? sheetState.draft[f] : (f === 'reps' ? Math.round(n) : n));
+  }
+  applySetDraft();
 }
 
 function openRestSheet(exId) {
@@ -595,6 +727,7 @@ function viewActive(w) {
         <div class="muted small row" style="gap:5px">${icon('timer', 15)}<span data-clock="workout"></span></div></div>
       <button class="btn primary sm" data-act="finish">Finish</button>
     </header>
+    ${S.getMeta('tipLogFlow') ? '' : `<div class="tip">${icon('check', 16)}<span>Tap <b>✓</b> the moment you finish a set. That starts your rest right away. Change the numbers afterwards by tapping them.</span><button class="icon-btn" data-act="dismiss-tip" aria-label="Dismiss tip">${icon('x', 16)}</button></div>`}
     ${w.entries.map(en => entryCard(w, en)).join('') || `<div class="empty">Add your first exercise to get going.</div>`}
     <div class="stack">
       <button class="btn block" data-act="pick-ex" data-for="workout">${icon('plus')} Add exercise</button>
@@ -626,15 +759,23 @@ function entryCard(w, en) {
   </section>`;
 }
 
+/** One tappable number cell in a set row. Tapping opens the +/− panel instead of the keyboard. */
+function setCell(f, value, placeholder, need, label) {
+  const has = value !== '' && value != null;
+  const text = has ? value : (placeholder !== '' && placeholder != null ? placeholder : '–');
+  return `<button class="set-in${has ? '' : ' ph'}${need ? ' need' : ''}" data-act="edit-set" data-f="${f}" aria-label="${label}">${esc(text)}</button>`;
+}
+
 function setRow(t, en, s, j, prev, targets) {
   const h = hintFor(en, j, targets);
+  const missing = s.done && setMissing(t, s);
   let inputs;
   if (t === 'time') {
-    inputs = `<input class="set-in" data-f="sec" inputmode="decimal" placeholder="${h.sec ? fmtClock(h.sec) : '0:30'}" value="${s.sec !== '' && s.sec != null ? fmtClock(s.sec) : ''}" aria-label="Time">`;
+    inputs = setCell('sec', s.sec !== '' && s.sec != null ? fmtClock(s.sec) : '', h.sec ? fmtClock(h.sec) : '0:30', missing, 'Time');
   } else {
     const lbPh = t === 'bodyweight' ? (+h.lb > 0 ? h.lb : '0') : num(h.lb);
-    inputs = `<input class="set-in" data-f="lb" inputmode="decimal" placeholder="${esc(lbPh)}" value="${esc(num(s.lb))}" aria-label="Weight">
-      <input class="set-in" data-f="reps" inputmode="numeric" placeholder="${esc(num(h.reps))}" value="${esc(num(s.reps))}" aria-label="Reps">`;
+    inputs = setCell('lb', num(s.lb), lbPh, missing && t === 'weight' && (s.lb === '' || s.lb == null), 'Weight')
+      + setCell('reps', num(s.reps), num(h.reps), missing && !(+s.reps > 0), 'Reps');
   }
   return `<div class="set-grid set t-${t} ${s.done ? 'done' : ''} ${s.pr ? 'pr' : ''}" data-set="${s.id}">
     <span class="set-no">${j + 1}</span>
@@ -1237,28 +1378,43 @@ const ACTIONS = {
     if (!w) return;
     const { en, s, j } = findSet(w, el);
     if (!s) return;
-    if (s.done) { s.done = false; s.pr = false; S.put('workouts', w); render(); return; }
+    if (s.done) { s.done = false; recomputePRs(w, en.exId); S.put('workouts', w); render(); return; }
+    // Empty boxes take the suggested numbers. If there are none (first time doing this exercise),
+    // the set is still checked and rest starts. The numbers can be filled in during rest.
     const t = exType(en.exId);
     const h = hintFor(en, j, targetsFor(en.exId, w.id));
     if (t === 'time') {
       if (s.sec === '' || s.sec == null) s.sec = h.sec ?? '';
-      if (!(+s.sec > 0)) { toast('Enter a time first'); return; }
     } else {
       if (s.reps === '' || s.reps == null) s.reps = h.reps ?? '';
       if (s.lb === '' || s.lb == null) s.lb = h.lb ?? '';
-      if (!(+s.reps > 0)) { toast('Enter reps first'); return; }
-      if (t === 'weight' && s.lb === '') { toast('Enter a weight first'); return; }
     }
     s.done = true;
     s.doneAt = Date.now();
-    s.pr = isPR(en.exId, s, w.id);
+    const fresh = recomputePRs(w, en.exId);
     S.put('workouts', w);
     const e = ex(en.exId);
     if (e && e.rest > 0) startRest(e.rest, e.name);
-    if (s.pr) toast('New personal record!', 'gold');
+    if (setMissing(t, s)) toast('Rest started. Tap the boxes to add your numbers.');
+    else if (fresh) toast('New personal record!', 'gold');
     checkGoals();
     render();
   },
+  'edit-set': el => {
+    const w = activeWorkout();
+    if (!w) return;
+    const { en, s } = findSet(w, el);
+    if (s) openSetSheet(en.id, s.id, el.dataset.f);
+  },
+  'ss-step': el => setSheetStep(el.dataset.f, Number(el.dataset.d)),
+  'ss-log': () => {
+    const st = sheetState;
+    if (!st || st.kind !== 'set') return;
+    closeSheet();
+    const row = document.querySelector(`[data-entry="${st.entryId}"] [data-set="${st.setId}"] [data-act="toggle-set"]`);
+    if (row) ACTIONS['toggle-set'](row);
+  },
+  'dismiss-tip': () => { S.setMeta('tipLogFlow', true); render(); },
   'add-set': el => {
     const w = activeWorkout(); const { en } = findSet(w, el);
     if (!en) return;
@@ -1293,14 +1449,21 @@ const ACTIONS = {
   finish: async () => {
     const w = activeWorkout();
     if (!w) return;
-    const done = w.entries.reduce((n, en) => n + en.sets.filter(s => s.done).length, 0);
-    if (!done) {
-      if (await confirmBox('No sets completed', 'Discard this workout?', 'Discard', true)) discardWorkout(w);
+    const keep = (en, s) => s.done && !setMissing(exType(en.exId), s);
+    const count = fn => w.entries.reduce((n, en) => n + en.sets.filter(s => fn(en, s)).length, 0);
+    const good = count(keep);
+    const blank = count((en, s) => s.done && !keep(en, s));
+    const undone = count((en, s) => !s.done);
+    if (!good) {
+      const why = blank ? `Your ${blank} checked set${blank > 1 ? 's have' : ' has'} no numbers yet. Discard this workout?` : 'Discard this workout?';
+      if (await confirmBox('No sets completed', why, 'Discard', true)) discardWorkout(w);
       return;
     }
-    const undone = w.entries.reduce((n, en) => n + en.sets.filter(s => !s.done).length, 0);
-    if (!(await confirmBox('Finish workout?', undone ? `${undone} unchecked set${undone > 1 ? 's' : ''} will be left out.` : '', 'Finish'))) return;
-    w.entries = w.entries.map(en => ({ ...en, sets: en.sets.filter(s => s.done) })).filter(en => en.sets.length);
+    const notes = [];
+    if (undone) notes.push(`${undone} unchecked set${undone > 1 ? 's' : ''}`);
+    if (blank) notes.push(`${blank} checked set${blank > 1 ? 's' : ''} with no numbers (go back to fill ${blank > 1 ? 'them' : 'it'} in)`);
+    if (!(await confirmBox('Finish workout?', notes.length ? `${notes.join(' and ')} will be left out.` : '', 'Finish'))) return;
+    w.entries = w.entries.map(en => ({ ...en, sets: en.sets.filter(s => keep(en, s)) })).filter(en => en.sets.length);
     w.endedAt = Date.now();
     S.put('workouts', w);
     S.setMeta('activeWorkoutId', null);
@@ -1543,22 +1706,6 @@ const BINDS = {
   'set-wakeLock': el => { S.setSettings({ wakeLock: el.checked }); syncWakeLock(); },
 };
 
-function onSetInput(el) {
-  const w = activeWorkout();
-  if (!w) return;
-  const { s } = findSet(w, el);
-  if (!s) return;
-  const f = el.dataset.f, v = el.value.trim();
-  if (f === 'sec') {
-    const sec = parseClock(v, 'sec');
-    s.sec = v === '' ? '' : (sec ?? s.sec);
-  } else {
-    const n = parseFloat(v.replace(',', '.'));
-    s[f] = v === '' ? '' : (isNaN(n) ? s[f] : n);
-  }
-  S.put('workouts', w);
-}
-
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;
@@ -1568,7 +1715,7 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'pick-q') return renderPickList(el.value);
-  if (el.classList.contains('set-in')) return onSetInput(el);
+  if (el.classList.contains('ss-val')) return onSetSheetInput(el);
   const b = el.dataset && el.dataset.bind;
   if (b && BINDS[b]) BINDS[b](el);
 });
@@ -1583,7 +1730,7 @@ document.addEventListener('change', async e => {
   el.value = '';
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('set-in')) e.target.blur();
+  if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('ss-val')) e.target.blur();
   if (e.key === 'Enter' && e.target.dataset && e.target.dataset.bind === 'bw') ACTIONS['log-bw']();
   if (e.key === 'Escape' && !sheetEl.hidden) closeSheet();
 });
