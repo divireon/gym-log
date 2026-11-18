@@ -4,7 +4,7 @@ import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 import * as Push from './push.js';
 
-const VERSION = '1.6.1'; // keep in step with version.json when publishing
+const VERSION = '1.6.2'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -492,8 +492,10 @@ function toast(msg, kind = '') {
 }
 
 let sheetState = null;
-function openSheet(html, state) {
+/** layout: '' = bottom panel sized to its content, 'top' = fixed-height panel pinned to the top */
+function openSheet(html, state, layout = '') {
   sheetState = state;
+  sheetEl.className = 'sheet' + (layout ? ' ' + layout : '');
   sheetEl.innerHTML = `<div class="sheet-backdrop" data-act="close-sheet"></div><div class="sheet-panel">${html}</div>`;
   sheetEl.hidden = false;
   document.body.classList.add('no-scroll');
@@ -517,7 +519,7 @@ function confirmBox(title, msg, ok = 'OK', danger = false) {
 
 function openPicker(target) {
   openSheet(`<div class="sheet-head"><input id="pick-q" class="input" placeholder="Search or create exercise" autocomplete="off" enterkeyhint="search">
-    <button class="btn ghost sm" data-act="close-sheet">Cancel</button></div><div class="sheet-body" id="pick-list"></div>`, { kind: 'picker', target });
+    <button class="btn ghost sm" data-act="close-sheet">Cancel</button></div><div class="sheet-body" id="pick-list"></div>`, { kind: 'picker', target }, 'top');
   renderPickList('');
 }
 function renderPickList(q) {
