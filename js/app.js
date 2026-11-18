@@ -4,7 +4,7 @@ import { lineChart, sparkline } from './charts.js';
 import * as Sync from './sync.js';
 import * as Push from './push.js';
 
-const VERSION = '1.6.0'; // keep in step with version.json when publishing
+const VERSION = '1.6.1'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -537,6 +537,7 @@ function renderPickList(q) {
       `<button class="pick-item" data-act="pick" data-id="${e.id}"><span>${esc(e.name)}</span><small>${TYPE_SHORT[e.type]}</small></button>`).join('');
   }
   list.innerHTML = h || '<p class="muted" style="padding:16px">No exercises found.</p>';
+  list.scrollTop = 0; // best matches stay in view while typing
 }
 
 // ---------- set editor: big +/− buttons instead of the keyboard ----------
@@ -638,6 +639,21 @@ function onSetSheetInput(el) {
     sheetState.draft[f] = v === '' ? '' : (isNaN(n) ? sheetState.draft[f] : (f === 'reps' ? Math.round(n) : n));
   }
   applySetDraft();
+}
+
+// Track the visible part of the screen so bottom panels sit above the iPhone keyboard.
+function syncViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement.style;
+  root.setProperty('--vv-h', vv.height + 'px');
+  root.setProperty('--vv-top', vv.offsetTop + 'px');
+  document.body.classList.toggle('kb-open', window.innerHeight - vv.height > 120);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncViewport);
+  window.visualViewport.addEventListener('scroll', syncViewport);
+  syncViewport();
 }
 
 function openRestSheet(exId) {
