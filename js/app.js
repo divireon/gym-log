@@ -6,7 +6,7 @@ import * as Push from './push.js';
 import { buildDemo } from './demo.js';
 import * as Tour from './tour.js';
 
-const VERSION = '1.7.0'; // keep in step with version.json when publishing
+const VERSION = '1.7.1'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -1856,8 +1856,17 @@ Sync.init({ onRemote: () => safeRender(), onStatus: () => updateSyncCard() });
 // Look for app updates shortly after launch and whenever the app comes back to the foreground.
 setTimeout(() => checkForUpdate(), 1500);
 document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') blurTextField();
   if (document.visibilityState === 'visible' && Date.now() - lastUpdateCheck > 5 * 60 * 1000) checkForUpdate();
 });
+window.addEventListener('pagehide', blurTextField);
+
+// Close any open text box when the phone locks or the app goes to the background, so iOS has less
+// reason to show "Undo Typing" when the phone is shaken coming out of a pocket.
+function blurTextField() {
+  const el = document.activeElement;
+  if (el && el !== document.body && (el.matches('input, textarea, select') || el.isContentEditable)) el.blur();
+}
 
 if ('serviceWorker' in navigator) {
   const local = ['localhost', '127.0.0.1'].includes(location.hostname) && !location.search.includes('sw=1');
