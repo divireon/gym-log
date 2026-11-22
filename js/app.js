@@ -6,7 +6,7 @@ import * as Push from './push.js';
 import { buildDemo } from './demo.js';
 import * as Tour from './tour.js';
 
-const VERSION = '1.7.1'; // keep in step with version.json when publishing
+const VERSION = '1.8.0'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -88,6 +88,7 @@ const P = {
   trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0V4zM8 6H5v1.5A3 3 0 0 0 8 10.5M16 6h3v1.5a3 3 0 0 1-3 3M12 13v4M8.5 20h7M10 17h4"/>',
   cloud: '<path d="M7 18h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.3 9.6 4.2 4.2 0 0 0 7 18z"/>',
   play: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z"/>',
+  flame: '<path d="M12 21c-3.6 0-6.5-2.6-6.5-6.2 0-2.6 1.5-4.4 3-6 .4 1.6 1.3 2.7 2.4 3.2C10.6 8.6 12 5.6 14.5 3c.3 3 1.6 4.6 2.8 6.2 1 1.4 1.7 3 1.7 5.1 0 4-3.2 6.7-7 6.7z"/>',
 };
 const icon = (n, s = 22) => `<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
 
@@ -103,7 +104,18 @@ const exType = id => (ex(id) ? ex(id).type : 'weight');
 const finished = () => S.all('workouts').filter(w => w.endedAt).sort((a, b) => b.startedAt - a.startedAt);
 const runList = () => S.all('runs').sort((a, b) => b.date - a.date);
 const activities = () => [...finished().map(w => w.startedAt), ...S.all('runs').map(r => r.date)];
-const newSet = () => ({ id: S.uid(), lb: '', reps: '', sec: '', done: false });
+const newSet = (burn = false) => ({ id: S.uid(), lb: '', reps: '', sec: '', done: false, ...(burn ? { burn: true } : {}) });
+// Burn sets (drop sets) count toward sets and volume, but not toward suggestions, PRs or charts.
+const isBurn = s => !!(s && s.burn);
+const workSets = sets => sets.filter(s => !isBurn(s));
+/** Position of set j among sets of its own kind (work sets and burn sets are numbered apart). */
+function kindIndex(en, j) {
+  const b = isBurn(en.sets[j]);
+  let n = 0;
+  for (let k = 0; k < j; k++) if (isBurn(en.sets[k]) === b) n++;
+  return n;
+}
+const setLabel = (en, j) => isBurn(en.sets[j]) ? (en.sets.filter(isBurn).length > 1 ? `B${kindIndex(en, j) + 1}` : 'B') : String(kindIndex(en, j) + 1);
 
 function activeWorkout() {
   const id = S.getMeta('activeWorkoutId');
@@ -111,13 +123,13 @@ function activeWorkout() {
   return w && !w.deleted && !w.endedAt ? w : null;
 }
 
-/** Sets from the most recent finished workout that included this exercise. */
-function lastSession(exId, excludeWid) {
+/** Work sets (or, with burn=true, burn sets) from the most recent finished workout that had them. */
+function lastSession(exId, excludeWid, burn = false) {
   for (const w of finished()) {
     if (w.id === excludeWid) continue;
     for (const en of w.entries) {
       if (en.exId !== exId) continue;
-      const sets = en.sets.filter(s => s.done);
+      const sets = en.sets.filter(s => s.done && isBurn(s) === burn);
       if (sets.length) return sets;
     }
   }
@@ -129,8 +141,8 @@ function sessionsFor(exId) {
   const out = [];
   for (const w of finished()) for (const en of w.entries) {
     if (en.exId !== exId) continue;
-    const sets = en.sets.filter(s => s.done);
-    if (sets.length) out.push({ w, at: w.startedAt, sets });
+    const all = en.sets.filter(s => s.done), sets = workSets(all);
+    if (sets.length) out.push({ w, at: w.startedAt, sets, all });
   }
   return out.reverse();
 }
@@ -142,7 +154,7 @@ function bests(exId, { skipSetId = null, excludeWorkout = null } = {}) {
     for (const en of w.entries) {
       if (en.exId !== exId) continue;
       for (const s of en.sets) {
-        if (!s.done || s.id === skipSetId) continue;
+        if (!s.done || isBurn(s) || s.id === skipSetId) continue;
         b.any = true;
         const lb = +s.lb || 0, reps = +s.reps || 0, sec = +s.sec || 0;
         const e = e1rm(lb, reps);
@@ -174,7 +186,7 @@ function recomputePRs(w, exId) {
   if (!hist.any) return false;
   const run = { e1rm: hist.e1rm, lb: hist.lb, reps: hist.reps, sec: hist.sec };
   let fresh = false;
-  sets.filter(s => s.done && !setMissing(t, s))
+  sets.filter(s => s.done && !isBurn(s) && !setMissing(t, s))
     .sort((a, b) => (a.doneAt || 0) - (b.doneAt || 0))
     .forEach(s => {
       const lb = +s.lb || 0, reps = +s.reps || 0, sec = +s.sec || 0, e = e1rm(lb, reps);
@@ -567,7 +579,7 @@ function openSetSheet(entryId, setId, focusField) {
   if (j < 0) return;
   const s = en.sets[j], t = exType(en.exId);
   // start from what's logged, else the suggested target, else empty
-  const h = hintFor(en, j, targetsFor(en.exId, w.id));
+  const h = hintFor(en, j, targetsFor(en.exId, w.id), w.id);
   const pick = f => (s[f] !== '' && s[f] != null ? s[f] : (h[f] !== '' && h[f] != null ? h[f] : ''));
   const draft = t === 'time' ? { sec: pick('sec') } : { lb: pick('lb'), reps: pick('reps') };
   openSheet('', { kind: 'set', entryId, setId, draft, focusField, onClose: () => render() });
@@ -579,7 +591,8 @@ function renderSetSheet() {
   const panel = sheetEl.querySelector('.sheet-panel');
   if (!c || !panel) return;
   const { en, j, s, t } = c, d = sheetState.draft;
-  const prev = lastSession(en.exId, c.w.id) || [];
+  const burn = isBurn(s);
+  const p = (lastSession(en.exId, c.w.id, burn) || [])[kindIndex(en, j)];
   const field = (f, label) => {
     const st = SET_STEPS[f];
     const shown = f === 'sec' ? (d.sec !== '' ? fmtClock(d.sec) : '') : num(d[f]);
@@ -599,7 +612,7 @@ function renderSetSheet() {
   panel.innerHTML = `<div class="sheet-pad set-sheet">
     <div class="ss-head">
       <div style="min-width:0"><div class="ss-title clamp">${esc(exName(en.exId))}</div>
-        <div class="muted small">Set ${j + 1}${s.done ? ' · logged' : ''}${prev[j] ? ` · last time ${fmtSetShort(t, prev[j])}` : ''}</div></div>
+        <div class="muted small">${burn ? `<span class="burn-text">Burn set${setLabel(en, j) === 'B' ? '' : ' ' + setLabel(en, j).slice(1)}</span>` : `Set ${setLabel(en, j)}`}${s.done ? ' · logged' : ''}${p ? ` · last time ${fmtSetShort(t, p)}` : ''}</div></div>
       ${restOn ? `<div class="ss-rest">${icon('timer', 16)}<span data-clock="rest"></span></div>` : ''}
     </div>
     ${fields}
@@ -692,13 +705,25 @@ function discardWorkout(w) {
   clearRest();
   render(true);
 }
-/** Value to suggest for set j: same set last session, else last set last session, else the set above. */
-function hintFor(en, j, prev) {
-  const p = prev[j] || prev[prev.length - 1];
+/**
+ * Value to suggest for set j: same set last session, else last set last session, else the set above.
+ * Burn sets: the same burn set last time, else about 70% of the weight above (rounded to 5 lb).
+ */
+function hintFor(en, j, prev, wid) {
+  const k = kindIndex(en, j);
+  if (isBurn(en.sets[j])) {
+    const last = lastSession(en.exId, wid, true) || [];
+    if (last[k]) return last[k];
+    if (j < 1) return {};
+    const a = en.sets[j - 1], ah = hintFor(en, j - 1, prev, wid);
+    const lb = +(a.lb !== '' && a.lb != null ? a.lb : ah.lb) || 0;
+    return { lb: lb > 0 ? Math.max(5, Math.round(lb * 0.7 / 5) * 5) : '', reps: '', sec: '' };
+  }
+  const p = prev[k] || prev[prev.length - 1];
   if (p) return p;
-  for (let k = j - 1; k >= 0; k--) {
-    const s = en.sets[k];
-    if (s.lb !== '' || s.reps !== '' || s.sec !== '') return s;
+  for (let i = j - 1; i >= 0; i--) {
+    const s = en.sets[i];
+    if (!isBurn(s) && (s.lb !== '' || s.reps !== '' || s.sec !== '')) return s;
   }
   return {};
 }
@@ -772,9 +797,10 @@ function entryCard(w, en) {
     </div>
     ${sug ? `<div class="sug sug-${sug.mode}">${icon(sugIcon[sug.mode] || 'chev', 15)}<span>${sug.text}</span></div>` : ''}
     <div class="set-grid set-head t-${t}"><span>Set</span><span>Last time</span>${cols.map(c => `<span>${c}</span>`).join('')}<span></span></div>
-    ${en.sets.map((s, j) => setRow(t, en, s, j, prev, targets)).join('')}
+    ${en.sets.map((s, j) => setRow(t, en, s, j, prev, targets, w.id)).join('')}
     <div class="entry-foot">
       <button class="btn ghost sm" data-act="add-set">${icon('plus', 16)} Add set</button>
+      ${t !== 'time' ? `<button class="btn ghost sm burn-btn" data-act="add-burn">${icon('flame', 16)} Burn set</button>` : ''}
       ${en.sets.length > 1 ? `<button class="btn ghost sm muted-btn" data-act="remove-set">${icon('minus', 16)} Remove set</button>` : ''}
     </div>
   </section>`;
@@ -787,8 +813,10 @@ function setCell(f, value, placeholder, need, label) {
   return `<button class="set-in${has ? '' : ' ph'}${need ? ' need' : ''}" data-act="edit-set" data-f="${f}" aria-label="${label}">${esc(text)}</button>`;
 }
 
-function setRow(t, en, s, j, prev, targets) {
-  const h = hintFor(en, j, targets);
+function setRow(t, en, s, j, prev, targets, wid) {
+  const h = hintFor(en, j, targets, wid);
+  const burn = isBurn(s);
+  const p = (burn ? (lastSession(en.exId, wid, true) || []) : prev)[kindIndex(en, j)];
   const missing = s.done && setMissing(t, s);
   let inputs;
   if (t === 'time') {
@@ -798,9 +826,9 @@ function setRow(t, en, s, j, prev, targets) {
     inputs = setCell('lb', num(s.lb), lbPh, missing && t === 'weight' && (s.lb === '' || s.lb == null), 'Weight')
       + setCell('reps', num(s.reps), num(h.reps), missing && !(+s.reps > 0), 'Reps');
   }
-  return `<div class="set-grid set t-${t} ${s.done ? 'done' : ''} ${s.pr ? 'pr' : ''}" data-set="${s.id}">
-    <span class="set-no">${j + 1}</span>
-    <span class="prev">${prev[j] ? fmtSetShort(t, prev[j]) : '—'}</span>
+  return `<div class="set-grid set t-${t} ${s.done ? 'done' : ''} ${s.pr ? 'pr' : ''} ${burn ? 'burn' : ''}" data-set="${s.id}">
+    <span class="set-no"${burn ? ' aria-label="Burn set"' : ''}>${setLabel(en, j)}</span>
+    <span class="prev">${p ? fmtSetShort(t, p) : '—'}</span>
     ${inputs}
     <button class="check" data-act="toggle-set" aria-label="${s.done ? 'Undo set' : 'Complete set'}">${s.pr ? '<b>PR</b>' : icon('check', 18)}</button>
   </div>`;
@@ -821,7 +849,8 @@ function viewWorkoutDetail(id, opts = {}) {
     ${w.entries.map(en => {
       const t = exType(en.exId);
       return `<div class="card d-entry"><button class="d-entry-name" data-act="open" data-screen="exercise" data-id="${en.exId}">${esc(exName(en.exId))}</button>
-        ${en.sets.filter(s => s.done).map((s, i) => `<div class="d-set"><span class="n">${i + 1}</span><span>${fmtSetLong(t, s)}</span>${s.pr ? '<span class="badge">PR</span>' : ''}</div>`).join('')}</div>`;
+        ${(() => { const d = { ...en, sets: en.sets.filter(s => s.done) };
+          return d.sets.map((s, i) => `<div class="d-set"><span class="n${isBurn(s) ? ' burn-text' : ''}">${setLabel(d, i)}</span><span>${fmtSetLong(t, s)}</span>${s.pr ? '<span class="badge">PR</span>' : ''}${isBurn(s) ? '<span class="badge burn">BURN</span>' : ''}</div>`).join(''); })()}</div>`;
     }).join('')}
     <div class="stack">
       <button class="btn block" data-act="save-as-routine" data-id="${w.id}">Save as routine</button>
@@ -943,7 +972,7 @@ function viewExercise(id, opts = {}) {
     ${sess.length ? `<div class="section-head"><h2>History</h2></div><div class="card list">${sess.slice().reverse().slice(0, 30).map(s => `
       <button class="row-item" data-act="open" data-screen="workout" data-id="${s.w.id}"><div style="min-width:0">
         <div class="small muted">${dateLabel(s.at)}</div>
-        <div class="clamp">${s.sets.map(z => fmtSetShort(t, z) + (z.pr ? ' ★' : '')).join(' · ')}</div></div>${icon('chev', 18)}</button>`).join('')}</div>` : ''}`;
+        <div class="clamp">${s.all.map(z => (isBurn(z) ? '<span class="burn-text">B</span> ' : '') + fmtSetShort(t, z) + (z.pr ? ' ★' : '')).join(' · ')}</div></div>${icon('chev', 18)}</button>`).join('')}</div>` : ''}`;
 }
 
 let exDraft = null;
@@ -1405,7 +1434,7 @@ const ACTIONS = {
     // Empty boxes take the suggested numbers. If there are none (first time doing this exercise),
     // the set is still checked and rest starts. The numbers can be filled in during rest.
     const t = exType(en.exId);
-    const h = hintFor(en, j, targetsFor(en.exId, w.id));
+    const h = hintFor(en, j, targetsFor(en.exId, w.id), w.id);
     if (t === 'time') {
       if (s.sec === '' || s.sec == null) s.sec = h.sec ?? '';
     } else {
@@ -1442,7 +1471,15 @@ const ACTIONS = {
   'add-set': el => {
     const w = activeWorkout(); const { en } = findSet(w, el);
     if (!en) return;
-    en.sets.push(newSet()); S.put('workouts', w); render();
+    // new work sets go above any burn sets, which stay at the end
+    let at = en.sets.length;
+    while (at > 0 && isBurn(en.sets[at - 1])) at--;
+    en.sets.splice(at, 0, newSet()); S.put('workouts', w); render();
+  },
+  'add-burn': el => {
+    const w = activeWorkout(); const { en } = findSet(w, el);
+    if (!en) return;
+    en.sets.push(newSet(true)); S.put('workouts', w); render();
   },
   'remove-set': el => {
     const w = activeWorkout(); const { en } = findSet(w, el);
@@ -1501,7 +1538,7 @@ const ACTIONS = {
   'save-as-routine': el => {
     const w = S.get('workouts', el.dataset.id);
     if (!w) return;
-    S.put('routines', { name: w.name, items: w.entries.map(en => ({ exId: en.exId, sets: en.sets.length })) });
+    S.put('routines', { name: w.name, items: w.entries.map(en => ({ exId: en.exId, sets: Math.max(1, workSets(en.sets).length) })) });
     toast('Saved to your routines');
   },
   'delete-workout': async el => {
@@ -1816,6 +1853,7 @@ const TOUR_STEPS = [
   { target: '.entry .set .check', title: 'Tap ✓ when you finish a set', text: 'One tap logs the set with those numbers. No typing needed if you hit the target.', before: tourActive },
   { target: '#rest', title: 'Rest timer starts by itself', text: 'Tapping ✓ starts your rest countdown. Use <b>−15 / +15</b> to adjust, or <b>Skip</b>. With lock-screen alerts on, your phone <b>buzzes when rest is over</b>, even locked in your pocket.', before: tourSetDone },
   { target: '.sheet-panel', keepSheet: true, title: 'Did something different?', text: 'Tap any number to fix it with big <b>+ / −</b> buttons. You can do this during your rest, and the timer keeps running.', before: () => { const w = tourSetDone(); openSetSheet(w.entries[0].id, w.entries[0].sets[0].id, 'lb'); } },
+  { target: '.entry .burn-btn', title: 'Burn sets', text: 'Finish an exercise with a <b>drop set</b>: tap <b>Burn set</b>, strip some weight and go to failure. It shows as <b>B</b>, counts toward your volume, and is kept out of suggestions and records.', before: tourActive },
   { target: '.entry .chip', title: 'Rest time per exercise', text: 'Each exercise remembers its own rest time, like 3 minutes for bench and 1 minute for curls. Tap to change it.', before: tourActive },
   { target: '[data-act="finish"]', title: 'Finish', text: 'When you’re done, tap <b>Finish</b> for a summary of your sets, total weight lifted, and any new personal records.', before: tourActive },
   { target: '.card.hist', title: 'History', text: 'Every workout and run is saved here, newest first. Tap one to see every set.', before: () => { tourHome(); go('history'); } },

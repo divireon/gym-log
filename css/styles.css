@@ -17,6 +17,8 @@
   --gold-soft: rgba(245, 185, 66, .14);
   --run: #60a5fa;
   --violet: #a78bfa;
+  --burn: #fb923c;
+  --burn-soft: rgba(251, 146, 60, .14);
   --danger: #f87171;
   --r: 12px;
   --tab-h: 58px;
@@ -186,6 +188,14 @@ p { margin: 0; }
 .set.done .check { background: var(--good); color: var(--on-accent); }
 .set.pr .check { background: var(--gold); color: #241803; }
 .entry-foot { display: flex; gap: 2px; margin-top: 2px; }
+.entry-foot .btn { padding-left: 9px; padding-right: 9px; }
+
+/* burn (drop) sets */
+.set.burn .set-no, .burn-text, .d-set .n.burn-text { color: var(--burn); }
+.set.burn.done { background: var(--burn-soft); }
+.set.burn.done .check { background: var(--burn); color: #2a1203; }
+.btn.ghost.burn-btn { color: var(--burn); }
+.badge.burn { background: var(--burn-soft); color: var(--burn); }
 
 /* rest bar */
 .rest {
