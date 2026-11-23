@@ -6,7 +6,7 @@ import * as Push from './push.js';
 import { buildDemo } from './demo.js';
 import * as Tour from './tour.js';
 
-const VERSION = '1.8.0'; // keep in step with version.json when publishing
+const VERSION = '1.9.0'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -88,6 +88,7 @@ const P = {
   trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0V4zM8 6H5v1.5A3 3 0 0 0 8 10.5M16 6h3v1.5a3 3 0 0 1-3 3M12 13v4M8.5 20h7M10 17h4"/>',
   cloud: '<path d="M7 18h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.3 9.6 4.2 4.2 0 0 0 7 18z"/>',
   play: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z"/>',
+  pencil: '<path d="M4 20l4.2-1 10.3-10.3a2.1 2.1 0 0 0-3-3L5.2 16 4 20zM13.8 7.2l3 3"/>',
   flame: '<path d="M12 21c-3.6 0-6.5-2.6-6.5-6.2 0-2.6 1.5-4.4 3-6 .4 1.6 1.3 2.7 2.4 3.2C10.6 8.6 12 5.6 14.5 3c.3 3 1.6 4.6 2.8 6.2 1 1.4 1.7 3 1.7 5.1 0 4-3.2 6.7-7 6.7z"/>',
 };
 const icon = (n, s = 22) => `<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
@@ -524,10 +525,10 @@ function closeSheet() {
   if (s && s.kind === 'confirm') s.res(false);
   if (s && s.onClose) s.onClose();
 }
-function confirmBox(title, msg, ok = 'OK', danger = false) {
+function confirmBox(title, msg, ok = 'OK', danger = false, cancel = 'Cancel') {
   return new Promise(res => {
     openSheet(`<div class="sheet-pad"><h3>${esc(title)}</h3>${msg ? `<p class="muted">${esc(msg)}</p>` : ''}
-      <div class="row gap" style="margin-top:18px"><button class="btn block" data-act="close-sheet">Cancel</button>
+      <div class="row gap" style="margin-top:18px"><button class="btn block" data-act="close-sheet">${esc(cancel)}</button>
       <button class="btn block ${danger ? 'danger' : 'primary'}" data-act="confirm-yes">${esc(ok)}</button></div></div>`, { kind: 'confirm', res });
   });
 }
@@ -842,7 +843,7 @@ function viewWorkoutDetail(id, opts = {}) {
     ${opts.summary ? `<div class="banner">${icon('check')} Workout saved${st.prs ? ` · ${st.prs} new PR${st.prs > 1 ? 's' : ''}` : ''}</div>` : ''}
     <div class="detail-title"><h2>${esc(w.name)}</h2><div class="muted">${dateLabel(w.startedAt)} · ${timeOfDay(w.startedAt)}</div></div>
     <div class="stats3">
-      <div class="stat"><b>${fmtDur(st.dur)}</b><span>duration</span></div>
+      <button class="stat stat-edit" data-act="edit-time" data-id="${w.id}" aria-label="Edit workout time"><b>${fmtDur(st.dur)}</b><span>duration ${icon('pencil', 11)}</span></button>
       <div class="stat"><b>${st.sets}</b><span>sets</span></div>
       <div class="stat"><b>${fmtNum(st.vol)}</b><span>lb volume</span></div>
     </div>
@@ -856,6 +857,39 @@ function viewWorkoutDetail(id, opts = {}) {
       <button class="btn block" data-act="save-as-routine" data-id="${w.id}">Save as routine</button>
       <button class="btn ghost danger-text block" data-act="delete-workout" data-id="${w.id}">Delete workout</button>
     </div>`;
+}
+
+/** When the last set of a workout was checked (null if no set has a time). */
+function lastSetAt(w) {
+  let t = 0;
+  for (const en of w.entries) for (const s of en.sets) if (s.done && s.doneAt > t) t = s.doneAt;
+  return t || null;
+}
+const toLocalInput = t => { const d = new Date(t); return `${isoDate(t)}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const fmtHM = sec => { const m = Math.max(0, Math.round(sec / 60)); return `${Math.floor(m / 60)}:${pad(m % 60)}`; };
+
+function openTimeSheet(id) {
+  const w = S.get('workouts', id);
+  if (!w || !w.endedAt) return;
+  const last = lastSetAt(w);
+  const lastOk = last && last > w.startedAt && last < w.endedAt - 60000;
+  openSheet(`<div class="sheet-pad">
+    <h3>Workout time</h3>
+    <p class="muted">Forgot to tap Finish? Fix when it started and how long it took.</p>
+    ${lastOk ? `<button class="btn block" data-act="time-last" data-id="${id}" style="margin:0 0 14px">${icon('check', 18)} End at last set: ${timeOfDay(last)} (${fmtDur((last - w.startedAt) / 1000)})</button>` : ''}
+    <label class="field"><span>Started</span><input class="input" type="datetime-local" id="wt-start" value="${toLocalInput(w.startedAt)}"></label>
+    <label class="field"><span>Length (h:mm)</span><input class="input" id="wt-len" inputmode="numeric" value="${fmtHM((w.endedAt - w.startedAt) / 1000)}" placeholder="1:15"></label>
+    <div class="ss-actions"><button class="btn big" data-act="close-sheet">Cancel</button><button class="btn primary big block" data-act="time-save" data-id="${id}">Save</button></div>
+  </div>`, { kind: 'wtime' });
+}
+function setWorkoutTime(id, start, end) {
+  const w = S.get('workouts', id);
+  if (!w) return;
+  w.startedAt = start; w.endedAt = end;
+  S.put('workouts', w);
+  closeSheet();
+  toast(`Workout time set to ${fmtDur((end - start) / 1000)}`);
+  render();
 }
 
 // ---------- views: runs ----------
@@ -1525,7 +1559,10 @@ const ACTIONS = {
     if (blank) notes.push(`${blank} checked set${blank > 1 ? 's' : ''} with no numbers (go back to fill ${blank > 1 ? 'them' : 'it'} in)`);
     if (!(await confirmBox('Finish workout?', notes.length ? `${notes.join(' and ')} will be left out.` : '', 'Finish'))) return;
     w.entries = w.entries.map(en => ({ ...en, sets: en.sets.filter(s => keep(en, s)) })).filter(en => en.sets.length);
-    w.endedAt = Date.now();
+    // Forgot to tap Finish? If the last set was long ago, offer to end the workout there.
+    const last = lastSetAt(w), idle = last ? Date.now() - last : 0;
+    w.endedAt = idle > 45 * 60000 && await confirmBox('Forgot to finish?', `Your last set was at ${timeOfDay(last)}, ${fmtDur(idle / 1000)} ago. End the workout then instead of now?`, 'End at last set', false, 'End now')
+      ? last : Date.now();
     S.put('workouts', w);
     S.setMeta('activeWorkoutId', null);
     clearRest();
@@ -1540,6 +1577,21 @@ const ACTIONS = {
     if (!w) return;
     S.put('routines', { name: w.name, items: w.entries.map(en => ({ exId: en.exId, sets: Math.max(1, workSets(en.sets).length) })) });
     toast('Saved to your routines');
+  },
+  'edit-time': el => openTimeSheet(el.dataset.id),
+  'time-last': el => {
+    const w = S.get('workouts', el.dataset.id), last = w && lastSetAt(w);
+    if (last) setWorkoutTime(w.id, w.startedAt, last);
+  },
+  'time-save': el => {
+    const start = new Date(document.getElementById('wt-start').value).getTime();
+    // "1:15" = 1 h 15 min; a bare number counts as minutes
+    const lv = document.getElementById('wt-len').value.trim();
+    const [a, b] = lv.split(/[:.]/).map(Number);
+    const len = /[:.]/.test(lv) ? a * 60 + (b || 0) : a;
+    if (!start || isNaN(start)) return toast('Pick a start time');
+    if (!len) return toast('Enter a length like 1:15 or 75');
+    setWorkoutTime(el.dataset.id, start, start + len * 60000);
   },
   'delete-workout': async el => {
     if (!(await confirmBox('Delete this workout?', 'This can’t be undone.', 'Delete', true))) return;
@@ -1857,6 +1909,7 @@ const TOUR_STEPS = [
   { target: '.entry .chip', title: 'Rest time per exercise', text: 'Each exercise remembers its own rest time, like 3 minutes for bench and 1 minute for curls. Tap to change it.', before: tourActive },
   { target: '[data-act="finish"]', title: 'Finish', text: 'When you’re done, tap <b>Finish</b> for a summary of your sets, total weight lifted, and any new personal records.', before: tourActive },
   { target: '.card.hist', title: 'History', text: 'Every workout and run is saved here, newest first. Tap one to see every set.', before: () => { tourHome(); go('history'); } },
+  { target: '.stat-edit', title: 'Forgot to tap Finish?', text: 'Tap the <b>duration</b> of any past workout to fix its start time and length, or end it at your last set in one tap.', before: () => { tourHome(); go('history'); open('workout', finished()[0].id); } },
   { target: '.card.goal', title: 'Goals', text: 'Set targets like <b>Bench 185 lb</b>, a body weight, a run distance or workouts per week, and watch the bar fill up.', before: () => { tourHome(); go('progress'); } },
   { target: () => document.querySelector('.heatmap')?.closest('.card'), title: 'Consistency', text: 'Each square is a day. Green means you trained. It’s an easy way to see your streaks.', before: () => go('progress') },
   { target: '.pr-row', title: 'Strength & records', text: 'Your best set and estimated one-rep max for every exercise, with a mini trend line. Tap one for the full chart.', before: () => go('progress') },

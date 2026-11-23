@@ -110,6 +110,9 @@ p { margin: 0; }
 .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 11px; padding: 10px 11px 8px; min-width: 0; }
 .stat b { display: block; font-size: 20px; font-weight: 700; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat span { font-size: 12px; color: var(--muted); }
+.stat-edit { text-align: left; }
+.stat-edit span { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); }
+.stat-edit:active { background: var(--surface-2); }
 
 /* home */
 .routine { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; }
