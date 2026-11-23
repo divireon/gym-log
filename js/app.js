@@ -6,7 +6,7 @@ import * as Push from './push.js';
 import { buildDemo } from './demo.js';
 import * as Tour from './tour.js';
 
-const VERSION = '1.9.0'; // keep in step with version.json when publishing
+const VERSION = '1.9.1'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -866,19 +866,22 @@ function lastSetAt(w) {
   return t || null;
 }
 const toLocalInput = t => { const d = new Date(t); return `${isoDate(t)}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-const fmtHM = sec => { const m = Math.max(0, Math.round(sec / 60)); return `${Math.floor(m / 60)}:${pad(m % 60)}`; };
 
 function openTimeSheet(id) {
   const w = S.get('workouts', id);
   if (!w || !w.endedAt) return;
   const last = lastSetAt(w);
   const lastOk = last && last > w.startedAt && last < w.endedAt - 60000;
+  const len = Math.max(0, Math.round((w.endedAt - w.startedAt) / 60000)); // minutes
   openSheet(`<div class="sheet-pad">
     <h3>Workout time</h3>
     <p class="muted">Forgot to tap Finish? Fix when it started and how long it took.</p>
     ${lastOk ? `<button class="btn block" data-act="time-last" data-id="${id}" style="margin:0 0 14px">${icon('check', 18)} End at last set: ${timeOfDay(last)} (${fmtDur((last - w.startedAt) / 1000)})</button>` : ''}
     <label class="field"><span>Started</span><input class="input" type="datetime-local" id="wt-start" value="${toLocalInput(w.startedAt)}"></label>
-    <label class="field"><span>Length (h:mm)</span><input class="input" id="wt-len" inputmode="numeric" value="${fmtHM((w.endedAt - w.startedAt) / 1000)}" placeholder="1:15"></label>
+    <div class="field-row">
+      <label class="field"><span>Hours</span><input class="input" id="wt-h" type="number" inputmode="numeric" min="0" value="${Math.floor(len / 60)}" placeholder="0"></label>
+      <label class="field"><span>Minutes</span><input class="input" id="wt-m" type="number" inputmode="numeric" min="0" max="59" value="${len % 60}" placeholder="0"></label>
+    </div>
     <div class="ss-actions"><button class="btn big" data-act="close-sheet">Cancel</button><button class="btn primary big block" data-act="time-save" data-id="${id}">Save</button></div>
   </div>`, { kind: 'wtime' });
 }
@@ -1585,12 +1588,11 @@ const ACTIONS = {
   },
   'time-save': el => {
     const start = new Date(document.getElementById('wt-start').value).getTime();
-    // "1:15" = 1 h 15 min; a bare number counts as minutes
-    const lv = document.getElementById('wt-len').value.trim();
-    const [a, b] = lv.split(/[:.]/).map(Number);
-    const len = /[:.]/.test(lv) ? a * 60 + (b || 0) : a;
+    const h = Math.max(0, Math.floor(+document.getElementById('wt-h').value || 0));
+    const m = Math.max(0, Math.round(+document.getElementById('wt-m').value || 0));
+    const len = h * 60 + m;
     if (!start || isNaN(start)) return toast('Pick a start time');
-    if (!len) return toast('Enter a length like 1:15 or 75');
+    if (!len) return toast('Enter how long the workout took');
     setWorkoutTime(el.dataset.id, start, start + len * 60000);
   },
   'delete-workout': async el => {
