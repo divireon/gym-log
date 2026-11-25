@@ -6,7 +6,7 @@ import * as Push from './push.js';
 import { buildDemo } from './demo.js';
 import * as Tour from './tour.js';
 
-const VERSION = '1.9.1'; // keep in step with version.json when publishing
+const VERSION = '1.10.0'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -15,8 +15,15 @@ const sheetEl = document.getElementById('sheet');
 const toastEl = document.getElementById('toast');
 
 // ---------- first-run seed ----------
+// New built-ins arrive with app updates. Skip one if the user already made an exercise with the
+// same name, so the list doesn't get duplicates.
 let added = false;
-for (const e of SEED_EXERCISES) added = S.seed('exercises', e) || added;
+const normName = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const haveNames = new Set(S.all('exercises').map(e => normName(e.name)));
+for (const e of SEED_EXERCISES) {
+  if (!S.get('exercises', e.id) && haveNames.has(normName(e.name))) continue;
+  added = S.seed('exercises', e) || added;
+}
 if (added) S.commit();
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch {}
 
