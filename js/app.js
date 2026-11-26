@@ -6,7 +6,7 @@ import * as Push from './push.js';
 import { buildDemo } from './demo.js';
 import * as Tour from './tour.js';
 
-const VERSION = '1.10.0'; // keep in step with version.json when publishing
+const VERSION = '1.11.0'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -101,9 +101,9 @@ const P = {
 const icon = (n, s = 22) => `<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
 
 // ---------- domain helpers ----------
-const TYPES = { weight: 'Weight × reps', bodyweight: 'Bodyweight reps', time: 'Timed hold' };
-const TYPE_SHORT = { weight: 'lb × reps', bodyweight: 'reps', time: 'time' };
-const GROUPS = ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms', 'Core', 'Other'];
+const TYPES = { weight: 'Weight × reps', bodyweight: 'Bodyweight reps', time: 'Timed hold', cardio: 'Cardio (time + level)' };
+const TYPE_SHORT = { weight: 'lb × reps', bodyweight: 'reps', time: 'time', cardio: 'time + level' };
+const GROUPS = ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms', 'Core', 'Cardio', 'Other'];
 const REST_OPTS = [0, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300];
 
 const ex = id => S.get('exercises', id);
@@ -112,7 +112,7 @@ const exType = id => (ex(id) ? ex(id).type : 'weight');
 const finished = () => S.all('workouts').filter(w => w.endedAt).sort((a, b) => b.startedAt - a.startedAt);
 const runList = () => S.all('runs').sort((a, b) => b.date - a.date);
 const activities = () => [...finished().map(w => w.startedAt), ...S.all('runs').map(r => r.date)];
-const newSet = (burn = false) => ({ id: S.uid(), lb: '', reps: '', sec: '', done: false, ...(burn ? { burn: true } : {}) });
+const newSet = (burn = false) => ({ id: S.uid(), lb: '', reps: '', sec: '', lvl: '', done: false, ...(burn ? { burn: true } : {}) });
 // Burn sets (drop sets) count toward sets and volume, but not toward suggestions, PRs or charts.
 const isBurn = s => !!(s && s.burn);
 const workSets = sets => sets.filter(s => !isBurn(s));
@@ -156,7 +156,7 @@ function sessionsFor(exId) {
 }
 
 function bests(exId, { skipSetId = null, excludeWorkout = null } = {}) {
-  const b = { e1rm: 0, lb: 0, reps: 0, sec: 0, best: null, any: false };
+  const b = { e1rm: 0, lb: 0, reps: 0, sec: 0, lvl: 0, best: null, any: false };
   for (const w of S.all('workouts')) {
     if (w.id === excludeWorkout) continue;
     for (const en of w.entries) {
@@ -168,6 +168,7 @@ function bests(exId, { skipSetId = null, excludeWorkout = null } = {}) {
         const e = e1rm(lb, reps);
         if (e > b.e1rm) { b.e1rm = e; b.best = s; }
         b.lb = Math.max(b.lb, lb); b.reps = Math.max(b.reps, reps); b.sec = Math.max(b.sec, sec);
+        b.lvl = Math.max(b.lvl, +s.lvl || 0);
       }
     }
   }
@@ -176,7 +177,7 @@ function bests(exId, { skipSetId = null, excludeWorkout = null } = {}) {
 
 /** A checked set that still needs its numbers (✓ was tapped with empty boxes). */
 function setMissing(t, s) {
-  if (t === 'time') return !(+s.sec > 0);
+  if (t === 'time' || t === 'cardio') return !(+s.sec > 0); // the level is optional
   return !(+s.reps > 0) || (t === 'weight' && (s.lb === '' || s.lb == null));
 }
 
@@ -192,19 +193,20 @@ function recomputePRs(w, exId) {
   sets.forEach(s => { s.pr = false; });
   const hist = bests(exId, { excludeWorkout: w.id });
   if (!hist.any) return false;
-  const run = { e1rm: hist.e1rm, lb: hist.lb, reps: hist.reps, sec: hist.sec };
+  const run = { e1rm: hist.e1rm, lb: hist.lb, reps: hist.reps, sec: hist.sec, lvl: hist.lvl };
   let fresh = false;
   sets.filter(s => s.done && !isBurn(s) && !setMissing(t, s))
     .sort((a, b) => (a.doneAt || 0) - (b.doneAt || 0))
     .forEach(s => {
-      const lb = +s.lb || 0, reps = +s.reps || 0, sec = +s.sec || 0, e = e1rm(lb, reps);
+      const lb = +s.lb || 0, reps = +s.reps || 0, sec = +s.sec || 0, lvl = +s.lvl || 0, e = e1rm(lb, reps);
       const pr = t === 'weight' ? (e > run.e1rm + 0.01 || lb > run.lb)
         : t === 'bodyweight' ? (reps > run.reps || (lb > 0 && lb > run.lb))
-          : sec > run.sec;
+          : t === 'cardio' ? (sec > run.sec || lvl > run.lvl)
+            : sec > run.sec;
       s.pr = pr;
       if (pr && !before.has(s.id)) fresh = true;
       run.e1rm = Math.max(run.e1rm, e); run.lb = Math.max(run.lb, lb);
-      run.reps = Math.max(run.reps, reps); run.sec = Math.max(run.sec, sec);
+      run.reps = Math.max(run.reps, reps); run.sec = Math.max(run.sec, sec); run.lvl = Math.max(run.lvl, lvl);
     });
   return fresh;
 }
@@ -232,11 +234,13 @@ function weekStreak() {
 function fmtSetShort(t, s) {
   if (!s) return '—';
   if (t === 'time') return fmtClock(+s.sec);
+  if (t === 'cardio') return fmtClock(+s.sec) + (+s.lvl > 0 ? ` · L${fmtNum(s.lvl, 1)}` : '');
   if (t === 'bodyweight') return (+s.lb > 0 ? `+${fmtNum(s.lb, 1)} × ` : '') + (s.reps || 0);
   return `${fmtNum(s.lb, 1)} × ${s.reps || 0}`;
 }
 function fmtSetLong(t, s) {
   if (t === 'time') return fmtClock(+s.sec);
+  if (t === 'cardio') return fmtClock(+s.sec) + (+s.lvl > 0 ? ` at level ${fmtNum(s.lvl, 1)}` : '');
   if (t === 'bodyweight') return (+s.lb > 0 ? `+${fmtNum(s.lb, 1)} lb × ${s.reps}` : `${s.reps} reps`);
   return `${fmtNum(s.lb, 1)} lb × ${s.reps}`;
 }
@@ -254,6 +258,8 @@ function progCfg(e) {
   } else if (e.type === 'weight') {
     if ((e.rest || 0) >= 150) { repMin = 5; repMax = 8; }
     if (LOWER_BODY.has(e.id)) inc = 10;
+  } else if (e.type === 'cardio') {
+    repMin = 5; repMax = 10; inc = 1; // minutes, minutes, levels
   }
   return { repMin: +e.repMin || repMin, repMax: +e.repMax || repMax, inc: +e.inc || inc };
 }
@@ -268,12 +274,27 @@ function suggest(exId, wid) {
     return {
       mode: 'new', targets: [],
       text: e.type === 'time' ? 'First time: hold as long as you can with good form.'
+        : e.type === 'cardio' ? `First time: pick a level you can keep up for ${c.repMin}–${c.repMax} minutes.`
         : e.type === 'bodyweight' ? `First time: do as many clean reps as you can. Goal range is ${c.repMin}–${c.repMax}.`
           : `First time: pick a weight you can lift for ${c.repMin}–${c.repMax} reps.`,
     };
   }
   if (e.type === 'time') {
     return { mode: 'reps', targets: last.map(s => ({ sec: (+s.sec || 0) + 5 })), text: `Add 5 seconds: aim for <b>${last.map(s => fmtClock((+s.sec || 0) + 5)).join(' / ')}</b>.` };
+  }
+  if (e.type === 'cardio') {
+    // Double progression on time: add a minute at the same level until you reach the top of the
+    // time range, then go up a level and drop back to the bottom.
+    const top = c.repMax * 60, step = s => ({ ...s, sec: Math.min(top, Math.floor((+s.sec || 0) / 60) * 60 + 60) });
+    const fmtC = s => `${fmtClock(s.sec)}${+s.lvl > 0 ? ` at level ${fmtNum(s.lvl, 1)}` : ''}`;
+    const L = Math.max(...last.map(s => +s.lvl || 0));
+    if (last.every(s => (+s.sec || 0) >= top)) {
+      if (!L) return { mode: 'weight', targets: last.map(s => ({ sec: s.sec, lvl: '' })), text: `You hit ${c.repMax} minutes. Time to turn up the level.` };
+      const t = { sec: c.repMin * 60, lvl: L + c.inc };
+      return { mode: 'weight', targets: last.map(() => t), text: `You hit ${c.repMax} minutes. Go up a level: <b>${fmtC(t)}</b>.` };
+    }
+    const targets = last.map(s => ({ sec: step(s).sec, lvl: s.lvl ?? '' }));
+    return { mode: 'reps', targets, text: `Add a minute: <b>${targets.map(fmtC).join(' / ')}</b>. Go up a level once you hit ${c.repMax} minutes.` };
   }
   const bw = e.type === 'bodyweight';
   const W = Math.max(...last.map(s => +s.lb || 0));
@@ -570,7 +591,11 @@ const SET_STEPS = {
   lb: { big: 5, fine: 2.5 },
   reps: { big: 1, fine: 0 },
   sec: { big: 15, fine: 5 },
+  lvl: { big: 1, fine: 0 },
 };
+/** Cardio time moves in whole minutes (fine: 15 s); a timed hold in 15 s (fine: 5 s). */
+const stepsFor = (t, f) => (t === 'cardio' && f === 'sec' ? { big: 60, fine: 15 } : SET_STEPS[f]);
+const stepText = (f, n) => (f !== 'sec' ? String(n) : n >= 60 ? `${n / 60}m` : `${n}s`);
 
 function setSheetCtx() {
   const st = sheetState, w = activeWorkout();
@@ -589,7 +614,7 @@ function openSetSheet(entryId, setId, focusField) {
   // start from what's logged, else the suggested target, else empty
   const h = hintFor(en, j, targetsFor(en.exId, w.id), w.id);
   const pick = f => (s[f] !== '' && s[f] != null ? s[f] : (h[f] !== '' && h[f] != null ? h[f] : ''));
-  const draft = t === 'time' ? { sec: pick('sec') } : { lb: pick('lb'), reps: pick('reps') };
+  const draft = t === 'time' ? { sec: pick('sec') } : t === 'cardio' ? { sec: pick('sec'), lvl: pick('lvl') } : { lb: pick('lb'), reps: pick('reps') };
   openSheet('', { kind: 'set', entryId, setId, draft, focusField, onClose: () => render() });
   renderSetSheet();
 }
@@ -602,19 +627,19 @@ function renderSetSheet() {
   const burn = isBurn(s);
   const p = (lastSession(en.exId, c.w.id, burn) || [])[kindIndex(en, j)];
   const field = (f, label) => {
-    const st = SET_STEPS[f];
+    const st = stepsFor(t, f);
     const shown = f === 'sec' ? (d.sec !== '' ? fmtClock(d.sec) : '') : num(d[f]);
     const small = f === 'lb' ? (st.fine ? `<div class="ss-fine"><button data-act="ss-step" data-f="lb" data-d="-${st.fine}">−${st.fine}</button><button data-act="ss-step" data-f="lb" data-d="${st.fine}">+${st.fine}</button></div>` : '')
-      : f === 'sec' ? `<div class="ss-fine"><button data-act="ss-step" data-f="sec" data-d="-${st.fine}">−${st.fine}s</button><button data-act="ss-step" data-f="sec" data-d="${st.fine}">+${st.fine}s</button></div>` : '';
-    const unit = f === 'sec' ? 's' : '';
+      : f === 'sec' ? `<div class="ss-fine"><button data-act="ss-step" data-f="sec" data-d="-${st.fine}">−${stepText(f, st.fine)}</button><button data-act="ss-step" data-f="sec" data-d="${st.fine}">+${stepText(f, st.fine)}</button></div>` : '';
     return `<div class="ss-field"><div class="ss-label">${label}</div>
       <div class="ss-row">
-        <button class="ss-btn" data-act="ss-step" data-f="${f}" data-d="-${st.big}">−${st.big}${unit}</button>
-        <input class="ss-val" data-f="${f}" inputmode="${f === 'reps' ? 'numeric' : 'decimal'}" value="${esc(shown)}" placeholder="–" aria-label="${label}">
-        <button class="ss-btn" data-act="ss-step" data-f="${f}" data-d="${st.big}">+${st.big}${unit}</button>
+        <button class="ss-btn" data-act="ss-step" data-f="${f}" data-d="-${st.big}">−${stepText(f, st.big)}</button>
+        <input class="ss-val" data-f="${f}" inputmode="${f === 'reps' ? 'numeric' : 'decimal'}" value="${esc(shown)}" placeholder="${f === 'sec' && t === 'cardio' ? 'min' : '–'}" aria-label="${label}">
+        <button class="ss-btn" data-act="ss-step" data-f="${f}" data-d="${st.big}">+${stepText(f, st.big)}</button>
       </div>${small}</div>`;
   };
   const fields = t === 'time' ? field('sec', 'Time')
+    : t === 'cardio' ? field('sec', 'Time') + field('lvl', 'Level')
     : field('lb', t === 'bodyweight' ? 'Added weight (lb)' : 'Weight (lb)') + field('reps', 'Reps');
   const restOn = rest && rest.endAt > Date.now();
   panel.innerHTML = `<div class="sheet-pad set-sheet">
@@ -648,7 +673,7 @@ function setSheetStep(f, delta) {
   if (!sheetState || sheetState.kind !== 'set') return;
   const d = sheetState.draft;
   let v = (+d[f] || 0) + delta;
-  v = f === 'lb' ? Math.max(0, Math.round(v * 100) / 100) : Math.max(0, Math.round(v));
+  v = f === 'lb' || f === 'lvl' ? Math.max(0, Math.round(v * 100) / 100) : Math.max(0, Math.round(v));
   d[f] = v;
   applySetDraft();
   renderSetSheet();
@@ -658,11 +683,13 @@ function onSetSheetInput(el) {
   if (!sheetState || sheetState.kind !== 'set') return;
   const f = el.dataset.f, v = el.value.trim();
   if (f === 'sec') {
-    const sec = parseClock(v, 'sec');
+    // cardio: a bare number is minutes ("7" = 7:00, "7.30" = 7:30), since the number pad has no colon
+    const c = setSheetCtx();
+    const sec = parseClock(v, c && c.t === 'cardio' ? 'min' : 'sec');
     sheetState.draft.sec = v === '' ? '' : (sec ?? sheetState.draft.sec);
   } else {
     const n = parseFloat(v.replace(',', '.'));
-    sheetState.draft[f] = v === '' ? '' : (isNaN(n) ? sheetState.draft[f] : (f === 'reps' ? Math.round(n) : n));
+    sheetState.draft[f] = v === '' ? '' : (isNaN(n) ? sheetState.draft[f] : (f === 'reps' ? Math.round(n) : f === 'lvl' ? Math.round(n * 10) / 10 : n));
   }
   applySetDraft();
 }
@@ -696,7 +723,7 @@ function defaultWorkoutName() {
 }
 function makeEntry(exId, count) {
   const last = lastSession(exId);
-  const n = count || (last ? last.length : 3);
+  const n = count || (last ? last.length : exType(exId) === 'cardio' ? 1 : 3);
   return { id: S.uid(), exId, sets: Array.from({ length: n }, newSet) };
 }
 function startWorkout(routine) {
@@ -731,7 +758,7 @@ function hintFor(en, j, prev, wid) {
   if (p) return p;
   for (let i = j - 1; i >= 0; i--) {
     const s = en.sets[i];
-    if (!isBurn(s) && (s.lb !== '' || s.reps !== '' || s.sec !== '')) return s;
+    if (!isBurn(s) && [s.lb, s.reps, s.sec, s.lvl].some(v => v !== '' && v != null)) return s;
   }
   return {};
 }
@@ -795,7 +822,7 @@ function entryCard(w, en) {
   const prev = lastSession(en.exId, w.id) || [];
   const sug = suggest(en.exId, w.id);
   const targets = sug && sug.targets.length ? sug.targets : prev;
-  const cols = t === 'weight' ? ['lb', 'Reps'] : t === 'bodyweight' ? ['+lb', 'Reps'] : ['Time'];
+  const cols = t === 'weight' ? ['lb', 'Reps'] : t === 'bodyweight' ? ['+lb', 'Reps'] : t === 'cardio' ? ['Time', 'Level'] : ['Time'];
   const sugIcon = { weight: 'up', reps: 'plus', hold: 'back', new: 'chev' };
   return `<section class="card entry" data-entry="${en.id}">
     <div class="entry-head">
@@ -808,7 +835,7 @@ function entryCard(w, en) {
     ${en.sets.map((s, j) => setRow(t, en, s, j, prev, targets, w.id)).join('')}
     <div class="entry-foot">
       <button class="btn ghost sm" data-act="add-set">${icon('plus', 16)} Add set</button>
-      ${t !== 'time' ? `<button class="btn ghost sm burn-btn" data-act="add-burn">${icon('flame', 16)} Burn set</button>` : ''}
+      ${t === 'weight' || t === 'bodyweight' ? `<button class="btn ghost sm burn-btn" data-act="add-burn">${icon('flame', 16)} Burn set</button>` : ''}
       ${en.sets.length > 1 ? `<button class="btn ghost sm muted-btn" data-act="remove-set">${icon('minus', 16)} Remove set</button>` : ''}
     </div>
   </section>`;
@@ -827,7 +854,10 @@ function setRow(t, en, s, j, prev, targets, wid) {
   const p = (burn ? (lastSession(en.exId, wid, true) || []) : prev)[kindIndex(en, j)];
   const missing = s.done && setMissing(t, s);
   let inputs;
-  if (t === 'time') {
+  if (t === 'cardio') {
+    inputs = setCell('sec', s.sec !== '' && s.sec != null ? fmtClock(s.sec) : '', h.sec ? fmtClock(h.sec) : '5:00', missing, 'Time')
+      + setCell('lvl', num(s.lvl), num(h.lvl), false, 'Level');
+  } else if (t === 'time') {
     inputs = setCell('sec', s.sec !== '' && s.sec != null ? fmtClock(s.sec) : '', h.sec ? fmtClock(h.sec) : '0:30', missing, 'Time');
   } else {
     const lbPh = t === 'bodyweight' ? (+h.lb > 0 ? h.lb : '0') : num(h.lb);
@@ -971,7 +1001,7 @@ function viewExercise(id, opts = {}) {
   const t = e.type;
   const sess = sessionsFor(id);
   const b = bests(id);
-  const metric = opts.metric || (t === 'weight' ? 'e1rm' : 'max');
+  const metric = opts.metric || (t === 'weight' ? 'e1rm' : t === 'cardio' ? 'time' : 'max');
 
   let records = '';
   if (t === 'weight') {
@@ -981,6 +1011,10 @@ function viewExercise(id, opts = {}) {
   } else if (t === 'bodyweight') {
     records = `<div class="stat"><b>${b.reps || '—'}</b><span>most reps</span></div>
       <div class="stat"><b>${b.lb ? '+' + fmtNum(b.lb, 1) : '—'}</b><span>most added lb</span></div>
+      <div class="stat"><b>${sess.length}</b><span>sessions</span></div>`;
+  } else if (t === 'cardio') {
+    records = `<div class="stat"><b>${b.sec ? fmtClock(b.sec) : '—'}</b><span>longest</span></div>
+      <div class="stat"><b>${b.lvl ? fmtNum(b.lvl, 1) : '—'}</b><span>highest level</span></div>
       <div class="stat"><b>${sess.length}</b><span>sessions</span></div>`;
   } else {
     records = `<div class="stat"><b>${b.sec ? fmtClock(b.sec) : '—'}</b><span>longest hold</span></div>
@@ -993,6 +1027,9 @@ function viewExercise(id, opts = {}) {
     else { title = 'Estimated 1-rep max (lb)'; points = sess.map(s => ({ x: s.at, y: Math.max(...s.sets.map(z => e1rm(+z.lb || 0, +z.reps || 0))) })); }
   } else if (t === 'bodyweight') {
     title = 'Most reps in a set'; points = sess.map(s => ({ x: s.at, y: Math.max(...s.sets.map(z => +z.reps || 0)) }));
+  } else if (t === 'cardio') {
+    if (metric === 'level') { title = 'Level'; points = sess.map(s => ({ x: s.at, y: Math.max(...s.sets.map(z => +z.lvl || 0)) })); }
+    else { title = 'Time'; fmtY = v => fmtClock(v); points = sess.map(s => ({ x: s.at, y: s.sets.reduce((a, z) => a + (+z.sec || 0), 0) })); }
   } else {
     title = 'Longest hold'; fmtY = v => fmtClock(v); points = sess.map(s => ({ x: s.at, y: Math.max(...s.sets.map(z => +z.sec || 0)) }));
   }
@@ -1003,13 +1040,14 @@ function viewExercise(id, opts = {}) {
     ${(() => {
       const sug = suggest(id, null), c = progCfg(e);
       return sug ? `<div class="card pad next-card"><div class="card-head"><span class="card-title">Next session</span>
-        ${t !== 'time' ? `<button class="faint small" data-act="open" data-screen="exercise-edit" data-id="${id}">${c.repMin}–${c.repMax} reps${t === 'weight' ? ` · +${c.inc} lb` : ''}</button>` : ''}</div>
+        ${t !== 'time' ? `<button class="faint small" data-act="open" data-screen="exercise-edit" data-id="${id}">${c.repMin}–${c.repMax} ${t === 'cardio' ? 'min' : 'reps'}${t === 'weight' ? ` · +${c.inc} lb` : ''}</button>` : ''}</div>
         <p>${sug.text}</p>${sug.targets.length ? `<p class="faint small" style="margin-top:6px">Last time: ${(lastSession(id) || []).map(z => fmtSetShort(t, z)).join(' · ')}</p>` : ''}</div>` : '';
     })()}
     <div class="stats3">${records}</div>
     <div class="card pad">
       <div class="card-head"><span class="card-title">${title}</span>
-        ${t === 'weight' ? `<div class="seg"><button class="${metric === 'e1rm' ? 'on' : ''}" data-act="ex-metric" data-m="e1rm">1RM</button><button class="${metric === 'top' ? 'on' : ''}" data-act="ex-metric" data-m="top">Top</button></div>` : ''}</div>
+        ${t === 'weight' ? `<div class="seg"><button class="${metric === 'e1rm' ? 'on' : ''}" data-act="ex-metric" data-m="e1rm">1RM</button><button class="${metric === 'top' ? 'on' : ''}" data-act="ex-metric" data-m="top">Top</button></div>`
+          : t === 'cardio' ? `<div class="seg"><button class="${metric === 'time' ? 'on' : ''}" data-act="ex-metric" data-m="time">Time</button><button class="${metric === 'level' ? 'on' : ''}" data-act="ex-metric" data-m="level">Level</button></div>` : ''}</div>
       ${points.length ? lineChart(points, { fmtY }) : '<div class="chart-empty">Log this exercise to see your progress here.</div>'}
       ${t === 'weight' && points.length ? '<p class="faint small" style="margin:8px 0 0">Est. 1RM uses the Epley formula: what you could likely lift once, based on weight × reps.</p>' : ''}
     </div>
@@ -1030,7 +1068,14 @@ function viewExerciseEdit() {
       <label class="field"><span>Muscle group</span><select class="input" data-bind="x-group">${GROUPS.map(g => `<option ${e.group === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
       <label class="field"><span>Rest timer</span><select class="input" data-bind="x-rest">${REST_OPTS.map(s => `<option value="${s}" ${(e.rest || 0) === s ? 'selected' : ''}>${s ? fmtClock(s) : 'Off'}</option>`).join('')}</select></label>
     </div>
-    ${e.type !== 'time' ? `<div class="section-head"><h2>Progression</h2></div>
+    ${e.type === 'cardio' ? `<div class="section-head"><h2>Progression</h2></div>
+      <p class="muted small" style="margin:-2px 2px 12px">Add a minute at the same level until you reach the longest time, then go up a level and drop back to the shortest.</p>
+      <div class="field-row three">
+        <label class="field"><span>Min minutes</span><input class="input" inputmode="numeric" data-bind="x-repMin" value="${esc(e.repMin)}"></label>
+        <label class="field"><span>Max minutes</span><input class="input" inputmode="numeric" data-bind="x-repMax" value="${esc(e.repMax)}"></label>
+        <label class="field"><span>Add (levels)</span><input class="input" inputmode="decimal" data-bind="x-inc" value="${esc(e.inc)}"></label>
+      </div>` : ''}
+    ${e.type !== 'time' && e.type !== 'cardio' ? `<div class="section-head"><h2>Progression</h2></div>
       <p class="muted small" style="margin:-2px 2px 12px">Add reps at the same weight until every set reaches the top of the range, then add weight and drop back to the bottom.</p>
       <div class="field-row three">
         <label class="field"><span>Min reps</span><input class="input" inputmode="numeric" data-bind="x-repMin" value="${esc(e.repMin)}"></label>
@@ -1161,6 +1206,9 @@ function viewProgress() {
     } else if (e.type === 'bodyweight') {
       right = `<b>${b.reps} reps</b>${b.lb ? `<small>+${fmtNum(b.lb, 1)} lb max</small>` : '<small>best set</small>'}`;
       vals = s.map(x => Math.max(...x.sets.map(z => +z.reps || 0)));
+    } else if (e.type === 'cardio') {
+      right = `<b>${fmtClock(b.sec)}</b><small>${b.lvl ? `level ${fmtNum(b.lvl, 1)} max` : 'longest'}</small>`;
+      vals = s.map(x => x.sets.reduce((a, z) => a + (+z.sec || 0), 0));
     } else {
       right = `<b>${fmtClock(b.sec)}</b><small>longest</small>`;
       vals = s.map(x => Math.max(...x.sets.map(z => +z.sec || 0)));
@@ -1479,8 +1527,9 @@ const ACTIONS = {
     // the set is still checked and rest starts. The numbers can be filled in during rest.
     const t = exType(en.exId);
     const h = hintFor(en, j, targetsFor(en.exId, w.id), w.id);
-    if (t === 'time') {
+    if (t === 'time' || t === 'cardio') {
       if (s.sec === '' || s.sec == null) s.sec = h.sec ?? '';
+      if (t === 'cardio' && (s.lvl === '' || s.lvl == null)) s.lvl = h.lvl ?? '';
     } else {
       if (s.reps === '' || s.reps == null) s.reps = h.reps ?? '';
       if (s.lb === '' || s.lb == null) s.lb = h.lb ?? '';
@@ -1687,8 +1736,9 @@ const ACTIONS = {
     if (S.all('exercises').some(x => x.id !== e.id && x.name.toLowerCase() === e.name.toLowerCase())) { toast('An exercise with that name already exists'); return; }
     if (e.type !== 'time') {
       e.repMin = Math.round(+e.repMin); e.repMax = Math.round(+e.repMax); e.inc = +e.inc;
-      if (!(e.repMin >= 1 && e.repMax >= e.repMin)) { toast('Max reps must be at least min reps'); return; }
-      if (!(e.inc > 0)) { toast('Enter how much weight to add'); return; }
+      const cardio = e.type === 'cardio';
+      if (!(e.repMin >= 1 && e.repMax >= e.repMin)) { toast(cardio ? 'Max minutes must be at least min minutes' : 'Max reps must be at least min reps'); return; }
+      if (!(e.inc > 0)) { toast(cardio ? 'Enter how many levels to add' : 'Enter how much weight to add'); return; }
     }
     const rec = { ...e }; if (!rec.id) delete rec.id;
     S.put('exercises', rec);
@@ -1918,6 +1968,7 @@ const TOUR_STEPS = [
   { target: '.entry .chip', title: 'Rest time per exercise', text: 'Each exercise remembers its own rest time, like 3 minutes for bench and 1 minute for curls. Tap to change it.', before: tourActive },
   { target: '[data-act="finish"]', title: 'Finish', text: 'When you’re done, tap <b>Finish</b> for a summary of your sets, total weight lifted, and any new personal records.', before: tourActive },
   { target: '.card.hist', title: 'History', text: 'Every workout and run is saved here, newest first. Tap one to see every set.', before: () => { tourHome(); go('history'); } },
+  { target: '.next-card', title: 'Cardio finishers', text: 'Machines like the <b>StairMaster</b> log <b>time and level</b>. Each session the app nudges you a minute longer, then up a level once you hit your top time.', before: () => { tourHome(); go('progress'); open('exercise', 'ex_stairmaster'); } },
   { target: '.stat-edit', title: 'Forgot to tap Finish?', text: 'Tap the <b>duration</b> of any past workout to fix its start time and length, or end it at your last set in one tap.', before: () => { tourHome(); go('history'); open('workout', finished()[0].id); } },
   { target: '.card.goal', title: 'Goals', text: 'Set targets like <b>Bench 185 lb</b>, a body weight, a run distance or workouts per week, and watch the bar fill up.', before: () => { tourHome(); go('progress'); } },
   { target: () => document.querySelector('.heatmap')?.closest('.card'), title: 'Consistency', text: 'Each square is a day. Green means you trained. It’s an easy way to see your streaks.', before: () => go('progress') },

@@ -1,5 +1,6 @@
 // Built-in exercise library. IDs are fixed so two devices seeding the list never create duplicates.
-// type: 'weight' = lb × reps, 'bodyweight' = reps (optional added lb), 'time' = timed hold
+// type: 'weight' = lb × reps, 'bodyweight' = reps (optional added lb), 'time' = timed hold,
+// 'cardio' = time + machine level
 // rest: default rest timer in seconds
 // IDs come from the name, so never rename an entry here: add a new one instead.
 // New entries reach existing installs on their next load (store.seed only adds missing ids).
@@ -370,6 +371,9 @@ const LIST = [
   ['Box Jump', 'bodyweight', 'Other', 90],
   ['Battle Ropes', 'time', 'Other', 60],
   ['Jump Rope', 'time', 'Other', 60],
+
+  // Cardio machines: time + level
+  ['StairMaster', 'cardio', 'Cardio', 0],
 ];
 
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');

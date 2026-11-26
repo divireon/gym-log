@@ -17,15 +17,18 @@ export function buildDemo() {
   // a day N days ago at a given hour
   const at = (daysAgo, hour, min = 0) => { const d = new Date(now - daysAgo * DAY); d.setHours(hour, min, 0, 0); return Math.min(d.getTime(), now - 60000); };
 
+  // cardio finishers: [level, minutes in the oldest session]; one set, a minute longer each week
+  const cardio = { ex_stairmaster: [8, 5] };
+
   // routines
   const routine = (name, exIds) => {
-    const r = { id: id('routine'), name, items: exIds.map(exId => ({ exId, sets: 3 })), updatedAt: now };
+    const r = { id: id('routine'), name, items: exIds.map(exId => ({ exId, sets: cardio[exId] ? 1 : 3 })), updatedAt: now };
     db.routines[r.id] = r;
     return r;
   };
   const push = routine('Push Day', ['ex_bench_press_barbell', 'ex_overhead_press_barbell', 'ex_lateral_raise', 'ex_triceps_pushdown']);
   const pull = routine('Pull Day', ['ex_deadlift', 'ex_pull_up', 'ex_barbell_row', 'ex_dumbbell_curl']);
-  const legs = routine('Leg Day', ['ex_squat_barbell', 'ex_romanian_deadlift', 'ex_leg_press', 'ex_calf_raise']);
+  const legs = routine('Leg Day', ['ex_squat_barbell', 'ex_romanian_deadlift', 'ex_leg_press', 'ex_calf_raise', 'ex_stairmaster']);
 
   // [starting lb, lb added per week, reps for the 3 sets]; lb null = bodyweight
   const plan = {
@@ -50,6 +53,11 @@ export function buildDemo() {
       const start = at(week * 7 + back, hour, 10 + k * 7);
       let t = start + 4 * 60000;
       const entries = r.items.map(({ exId }) => {
+        if (cardio[exId]) {
+          const [lvl, min] = cardio[exId];
+          t += (min + k) * 60000;
+          return { id: id('entry'), exId, sets: [{ id: id('set'), lb: '', reps: '', sec: (min + k) * 60, lvl, done: true, doneAt: t, pr: k > 0 }] };
+        }
         const [lb0, inc, reps] = plan[exId];
         const sets = reps.map((rp, i) => {
           t += 2.5 * 60000;
