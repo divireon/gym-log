@@ -33,6 +33,8 @@
    On short pages that leaves the bottom tab bar floating above a gap. Making the page at least
    that much taller makes iOS lay out the full screen, so fixed bars sit at the true bottom. */
 html { background: var(--bg); min-height: calc(100% + env(safe-area-inset-top, 0px)); }
+/* No pinch or double-tap zoom: it's an app, not a page. Scrolling still works in both directions. */
+html, body { touch-action: pan-x pan-y; }
 body {
   margin: 0; background: var(--bg); color: var(--text); min-height: 100%;
   font: 15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;

@@ -6,7 +6,7 @@ import * as Push from './push.js';
 import { buildDemo } from './demo.js';
 import * as Tour from './tour.js';
 
-const VERSION = '1.11.0'; // keep in step with version.json when publishing
+const VERSION = '1.11.1'; // keep in step with version.json when publishing
 const DAY = 86400000;
 const app = document.getElementById('app');
 const tabbar = document.getElementById('tabbar');
@@ -1901,6 +1901,9 @@ document.addEventListener('change', async e => {
   } catch (err) { toast(err.message || 'Import failed'); }
   el.value = '';
 });
+// iOS Safari ignores user-scalable=no, so also cancel its pinch gestures directly.
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
+
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('ss-val')) e.target.blur();
   if (e.key === 'Enter' && e.target.dataset && e.target.dataset.bind === 'bw') ACTIONS['log-bw']();
